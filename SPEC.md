@@ -282,7 +282,9 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 ## 9. Distribución
 
 - **MVP**: `cargo build --release` por plataforma; binario único `smusic` (instalable con `cargo install --path .`).
-- **Futuro**: GitHub Releases con binarios precompilados (Linux/macOS/Windows), publicación en crates.io, fórmula Homebrew, paquete scoop.
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build, clippy (`-D warnings`) y tests en Linux, macOS y Windows en cada push/PR a `main`.
+- **Releases**: al pushear un tag `v*` (`.github/workflows/release.yml`) se compilan y publican en GitHub Releases los binarios `smusic-linux-x86_64`, `smusic-macos-aarch64` y `smusic-windows-x86_64.exe`.
+- **Futuro**: publicación en crates.io, fórmula Homebrew, paquete scoop.
 
 ---
 

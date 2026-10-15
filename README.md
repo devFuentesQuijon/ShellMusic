@@ -1,6 +1,27 @@
 # ShellMusic
 
+[![CI](https://github.com/devFuentesQuijon/ShellMusic/actions/workflows/ci.yml/badge.svg)](https://github.com/devFuentesQuijon/ShellMusic/actions/workflows/ci.yml)
+
 TUI ultraliviana para buscar y reproducir música de YouTube Music desde la terminal. Escrita en Rust con ratatui; la reproducción corre a cargo de **mpv** (controlado por JSON IPC) y la búsqueda/resolución de **yt-dlp**.
+
+![ShellMusic](docs/screenshot.png)
+
+## Instalación
+
+### Opción 1: binario precompilado
+
+Descarga el binario para tu SO desde [GitHub Releases](https://github.com/devFuentesQuijon/ShellMusic/releases) (`smusic-linux-x86_64`, `smusic-macos-aarch64`, `smusic-windows-x86_64.exe`), dale permiso de ejecución (`chmod +x`) y ponlo en tu `PATH`.
+
+### Opción 2: compilar
+
+```sh
+# instalación como comando del sistema (~/.cargo/bin debe estar en el PATH)
+cargo install --path .
+smusic
+
+# o durante desarrollo, sin instalar
+cargo run --release
+```
 
 ## Dependencias
 
@@ -11,17 +32,6 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | Linux | `sudo apt install mpv` (o tu gestor de paquetes) + `pip install yt-dlp` |
 | macOS | `brew install mpv yt-dlp` |
 | Windows | `winget install mpv yt-dlp` |
-
-## Compilar y ejecutar
-
-```sh
-# instalación como comando del sistema (~/.cargo/bin debe estar en el PATH)
-cargo install --path .
-smusic
-
-# o durante desarrollo, sin instalar
-cargo run --release
-```
 
 ## Atajos de teclado
 
