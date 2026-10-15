@@ -210,10 +210,8 @@ async fn capture_task(
         match stdout.read(&mut bytes).await {
             Ok(0) | Err(_) => break,
             Ok(n) => {
-                let samples: Vec<i16> = bytes[..n]
-                    .chunks_exact(2)
-                    .map(|c| i16::from_le_bytes([c[0], c[1]]))
-                    .collect();
+                let (pairs, _) = bytes[..n].as_chunks::<2>();
+                let samples: Vec<i16> = pairs.iter().map(|c| i16::from_le_bytes(*c)).collect();
                 if let Some(frame) = processor.push_samples(&samples) {
                     *shared.lock().unwrap_or_else(|err| err.into_inner()) = frame.to_vec();
                 }
