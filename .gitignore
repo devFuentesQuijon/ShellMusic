@@ -1,0 +1,19 @@
+# Compilación Rust
+/target
+Cargo.lock.orig
+**/*.rs.bk
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Entorno
+.env

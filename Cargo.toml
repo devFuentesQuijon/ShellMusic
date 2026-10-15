@@ -1,0 +1,35 @@
+[package]
+name = "shellmusic"
+version = "0.1.0"
+edition = "2024"
+description = "TUI ultraliviana para buscar y reproducir música de YouTube Music (mpv + yt-dlp)"
+license = "MIT"
+
+[[bin]]
+name = "smusic"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+crossterm = { version = "0.29", features = ["event-stream"] }
+dirs = "7"
+futures-util = "0.3"
+ratatui = "0.30"
+rustfft = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = [
+    "io-util",
+    "macros",
+    "net",
+    "process",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+toml = "1"
+
+[profile.release]
+strip = true
+lto = true

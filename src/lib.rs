@@ -1,0 +1,10 @@
+pub mod app;
+pub mod browsers;
+pub mod config;
+pub mod favorites;
+pub mod player;
+pub mod playlists;
+pub mod providers;
+pub mod queue;
+pub mod tui;
+pub mod visualizer;
