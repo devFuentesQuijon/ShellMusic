@@ -4,6 +4,8 @@
 
 TUI ultraliviana para buscar y reproducir música de YouTube Music desde la terminal. Escrita en Rust con ratatui; la reproducción corre a cargo de **mpv** (controlado por JSON IPC) y la búsqueda/resolución de **yt-dlp**.
 
+![Demo de ShellMusic](docs/demo.gif)
+
 ![ShellMusic](docs/screenshot.png)
 
 ## Instalación
