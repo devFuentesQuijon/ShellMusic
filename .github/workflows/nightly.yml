@@ -1,0 +1,64 @@
+name: Integración nocturna
+
+# Tests de integración que necesitan red (yt-dlp/YouTube) y no corren en el CI
+# de cada push. Si fallan en una ejecución programada, se abre un issue.
+# Quedan fuera a propósito (no viables en runners de GitHub):
+# - mpv_ipc::mpv_plays_youtube_track... y mpv_auto::* — requieren navegador con
+#   sesión de YouTube o reproducción real (anti-bot bloquea IPs de datacenter)
+# - visualizer_audio — requiere PipeWire/PulseAudio con sink real
+
+on:
+  schedule:
+    - cron: '23 4 * * *' # a diario, 04:23 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write # para abrir el issue de aviso si falla
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Instalar mpv, ffmpeg y yt-dlp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpv ffmpeg
+          pipx install yt-dlp || {
+            python3 -m venv /tmp/ytdlp
+            /tmp/ytdlp/bin/pip install yt-dlp
+            sudo ln -sf /tmp/ytdlp/bin/yt-dlp /usr/local/bin/yt-dlp
+          }
+          yt-dlp --version
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test de búsqueda real en YouTube
+        run: cargo test --locked --test youtube_search -- --ignored --nocapture
+
+      - name: Test de detalle de error de mpv/yt-dlp
+        run: cargo test --locked --test mpv_ipc mpv_reports_stderr_detail_on_failure -- --ignored --nocapture
+
+      - name: Abrir issue si falla (solo ejecuciones programadas)
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if gh issue list --search "Integración nocturna fallida in:title" --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            echo "Ya hay un issue abierto; se añade comentario con el nuevo fallo"
+            gh issue comment "$(gh issue list --search 'Integración nocturna fallida in:title' --state open --json number --jq '.[0].number')" \
+              --body "Nuevo fallo el $(date -u +%F): $url"
+          else
+            gh issue create \
+              --title "Integración nocturna fallida ($(date -u +%F))" \
+              --body "El workflow de integración nocturna falló: $url" || true
+          fi
