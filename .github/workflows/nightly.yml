@@ -45,6 +45,9 @@ jobs:
       - name: Test de búsqueda real en YouTube
         run: cargo test --locked --test youtube_search -- --ignored --nocapture
 
+      - name: Test de búsqueda real en SoundCloud
+        run: cargo test --locked --test soundcloud_search -- --ignored --nocapture
+
       - name: Test de detalle de error de mpv/yt-dlp
         run: cargo test --locked --test mpv_ipc mpv_reports_stderr_detail_on_failure -- --ignored --nocapture
 

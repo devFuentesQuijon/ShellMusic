@@ -2,7 +2,7 @@
 name = "shellmusic"
 version = "0.1.0"
 edition = "2024"
-description = "TUI ultraliviana para buscar y reproducir música de YouTube Music (mpv + yt-dlp)"
+description = "TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud (mpv + yt-dlp)"
 license = "MIT"
 
 [[bin]]

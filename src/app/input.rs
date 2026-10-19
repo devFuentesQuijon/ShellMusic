@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc;
 
 use crate::player::Player;
-use crate::providers::{MusicProvider, Track};
+use crate::providers::Track;
 use crate::queue::Queue;
 
 use super::AppMsg;
@@ -19,7 +19,6 @@ const VOLUME_STEP: i16 = 5;
 pub(super) fn handle_key(
     app: &mut App,
     key: KeyEvent,
-    provider: &Arc<dyn MusicProvider>,
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
@@ -34,7 +33,7 @@ pub(super) fn handle_key(
     }
     match app.focus {
         Focus::Searching => match key.code {
-            KeyCode::Enter => submit_search(app, provider, tx),
+            KeyCode::Enter => submit_search(app, tx),
             KeyCode::Esc | KeyCode::Tab => app.focus = Focus::Browsing,
             KeyCode::BackTab => app.focus = Focus::Favorites,
             KeyCode::Backspace => {
@@ -211,6 +210,7 @@ fn playback_key(
                 app.overlay_list_select(0);
             }
         }
+        KeyCode::Char('m') => app.next_provider(),
         KeyCode::Char('v') => app.toggle_visualizer(),
         _ => {}
     }

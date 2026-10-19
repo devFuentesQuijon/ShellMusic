@@ -16,11 +16,11 @@ use crate::app::{App, Focus};
 
 const HELP_SEARCH: &str = "Enter buscar · Tab panel · Esc resultados · Ctrl+C salir";
 const HELP_RESULTS: &str =
-    "Enter reproducir · a cola · f favorito · A playlist · v visualizador · Tab · / · q salir";
+    "Enter reproducir · a cola · f favorito · A playlist · m proveedor · v visualizador · Tab · / · q salir";
 const HELP_QUEUE: &str =
-    "Enter reproducir · d eliminar · J/K mover · f ★ · P playlists · v vis · n/p · q salir";
+    "Enter reproducir · d eliminar · J/K mover · f ★ · P playlists · m prov · v vis · n/p · q salir";
 const HELP_FAVORITES: &str =
-    "Enter reproducir · a cola · d/f quitar · A playlist · v vis · Tab · q salir";
+    "Enter reproducir · a cola · d/f quitar · A playlist · m prov · v vis · Tab · q salir";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     // Con el visualizador activo se inserta una franja de 7 filas.

@@ -4,7 +4,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 
 use crate::player::Player;
-use crate::providers::{MusicProvider, Track};
+use crate::providers::Track;
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
@@ -60,18 +60,16 @@ pub(super) fn toggle_favorite(app: &mut App, track: Option<Track>) {
     app.save_favorites();
 }
 
-pub(super) fn submit_search(
-    app: &mut App,
-    provider: &Arc<dyn MusicProvider>,
-    tx: &mpsc::UnboundedSender<AppMsg>,
-) {
+pub(super) fn submit_search(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     let query = app.input.trim().to_string();
     if query.is_empty() || app.searching {
         return;
     }
+    let Some((_, provider)) = app.providers.get(app.active_provider).cloned() else {
+        return;
+    };
     app.searching = true;
     app.message = Some(Message::info(format!("buscando «{query}»…")));
-    let provider = Arc::clone(provider);
     let tx = tx.clone();
     let limit = app.results_limit;
     tokio::spawn(async move {

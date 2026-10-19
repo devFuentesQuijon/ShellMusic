@@ -8,10 +8,11 @@ use crate::app::{App, Focus};
 
 pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.focus == Focus::Searching;
+    let provider = app.active_provider_kind();
     let title = if focused {
-        "Buscar (Enter: buscar · Esc/Tab: resultados)"
+        format!("Buscar en {provider} (Enter: buscar · Esc/Tab: resultados)")
     } else {
-        "Buscar (/ para enfocar)"
+        format!("Buscar en {provider} (/ para enfocar)")
     };
     let border_style = if focused {
         Style::new().fg(Color::Cyan)

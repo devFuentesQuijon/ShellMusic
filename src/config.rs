@@ -4,9 +4,13 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
+use crate::providers::ProviderKind;
+
 const DEFAULT_TOML: &str = "\
 [general]
 results_per_search = 15   # 1-50
+providers = [\"youtube\", \"soundcloud\"]   # proveedores habilitados; la tecla m cicla entre ellos
+default_provider = \"youtube\"              # proveedor activo al arrancar (debe estar en la lista)
 
 [audio]
 initial_volume = 70       # 0-100
@@ -35,6 +39,8 @@ pub struct Config {
 #[serde(default)]
 pub struct General {
     pub results_per_search: usize,
+    pub providers: Vec<String>,
+    pub default_provider: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +53,8 @@ impl Default for General {
     fn default() -> Self {
         Self {
             results_per_search: 15,
+            providers: vec!["youtube".to_string(), "soundcloud".to_string()],
+            default_provider: "youtube".to_string(),
         }
     }
 }
@@ -116,6 +124,16 @@ impl Config {
         let mut config: Config =
             toml::from_str(&text).with_context(|| format!("{} inválido", path.display()))?;
         config.general.results_per_search = config.general.results_per_search.clamp(1, 50);
+        config
+            .general
+            .providers
+            .retain(|name| ProviderKind::from_name(name).is_some());
+        if config.general.providers.is_empty() {
+            config.general.providers.push("youtube".to_string());
+        }
+        if !config.general.providers.contains(&config.general.default_provider) {
+            config.general.default_provider = config.general.providers[0].clone();
+        }
         config.audio.initial_volume = config.audio.initial_volume.min(100);
         config.youtube.cookies_from_browser = config.youtube.cookies_from_browser.trim().to_string();
         config.youtube.player_client = config.youtube.player_client.trim().to_string();

@@ -145,7 +145,11 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 src/
 ├── main.rs            # entrada: runtime tokio, verifica dependencias, carga config
 ├── lib.rs             # re-exporta módulos (tests de integración)
-├── app.rs             # estado global + bucle de eventos (teclado / tick / mensajes async)
+├── app/               # estado global + bucle de eventos (teclado / tick / mensajes async)
+│   ├── mod.rs         # bucle run() + mensajes internos (AppMsg)
+│   ├── state.rs       # App, Focus, Overlay, NameContext y selección
+│   ├── input.rs       # manejo de teclas por foco y overlay
+│   └── playback.rs    # búsqueda, reproducción, cola y volumen
 ├── config.rs          # config nativa por SO, formato TOML, defaults
 ├── queue.rs           # cola de reproducción (añadir, eliminar, reordenar, actual)
 ├── favorites.rs       # favoritos locales (persistencia JSON atómica)
@@ -153,8 +157,10 @@ src/
 ├── visualizer.rs      # captura de audio + FFT + bandas (espectro)
 ├── browsers.rs        # detección de navegadores instalados (cookies anti-bot)
 ├── providers/
-│   ├── mod.rs         # trait MusicProvider + tipos Track
-│   └── youtube.rs     # YouTube Music vía yt-dlp
+│   ├── mod.rs         # trait MusicProvider + tipos Track + ProviderKind
+│   ├── ytdlp.rs       # helper compartido: búsqueda yt-dlp (ytsearch/scsearch) y parseo
+│   ├── youtube.rs     # YouTube Music vía yt-dlp
+│   └── soundcloud.rs  # SoundCloud vía yt-dlp
 ├── player/
 │   ├── mod.rs         # trait Player + tipos de estado (PlaybackStatus, PlayerEvent)
 │   └── mpv.rs         # cliente JSON IPC de mpv (socket Unix / named pipe Windows)
@@ -230,6 +236,7 @@ pub trait Player: Send + Sync {
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
+| m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (cicla los habilitados en `[general] providers`) |
 | v | Resultados / Cola / Favoritos | Activar / desactivar el visualizador de espectro |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
 | Enter / a / A / d / J / K / Esc | Overlay: contenido | Reproducir / encolar / reproducir toda / quitar / reordenar / volver |
@@ -243,6 +250,8 @@ pub trait Player: Send + Sync {
 ```toml
 [general]
 results_per_search = 15   # 1-50
+providers = ["youtube", "soundcloud"]   # proveedores habilitados; la tecla m cicla entre ellos
+default_provider = "youtube"            # proveedor activo al arrancar (debe estar en la lista)
 
 [audio]
 initial_volume = 70       # 0-100
@@ -283,7 +292,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 
 - **MVP**: `cargo build --release` por plataforma; binario único `smusic` (instalable con `cargo install --path .`).
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build, clippy (`-D warnings`) y tests en Linux, macOS y Windows en cada push/PR a `main`. En Linux se instalan además mpv+ffmpeg y corre el test de integración IPC local (`tests/mpv_ipc_local.rs`, sin red).
-- **Integración nocturna**: `.github/workflows/nightly.yml` corre a diario (04:23 UTC, también manual con `workflow_dispatch`) los tests que necesitan red: búsqueda real en YouTube (`tests/youtube_search.rs`) y detalle de error de mpv/yt-dlp (`tests/mpv_ipc.rs::mpv_reports_stderr_detail_on_failure`). Si falla una ejecución programada, se abre un issue automáticamente. Quedan excluidos a propósito los tests que requieren navegador con sesión de YouTube, reproducción real (el anti-bot bloquea IPs de datacenter) o stack de audio (PipeWire/PulseAudio).
+- **Integración nocturna**: `.github/workflows/nightly.yml` corre a diario (04:23 UTC, también manual con `workflow_dispatch`) los tests que necesitan red: búsqueda real en YouTube (`tests/youtube_search.rs`), búsqueda real en SoundCloud (`tests/soundcloud_search.rs`) y detalle de error de mpv/yt-dlp (`tests/mpv_ipc.rs::mpv_reports_stderr_detail_on_failure`). Si falla una ejecución programada, se abre un issue automáticamente. Quedan excluidos a propósito los tests que requieren navegador con sesión de YouTube, reproducción real (el anti-bot bloquea IPs de datacenter) o stack de audio (PipeWire/PulseAudio).
 - **Releases**: al pushear un tag `v*` (`.github/workflows/release.yml`) se compilan y publican en GitHub Releases los binarios `smusic-linux-x86_64`, `smusic-macos-aarch64` y `smusic-windows-x86_64.exe`.
 - **Futuro**: publicación en crates.io, fórmula Homebrew, paquete scoop.
 
@@ -299,7 +308,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **3** | Favoritos locales — **completada** |
 | **4** | Playlists locales — **completada** |
 | 5 | Provider Spotify (API oficial + OAuth; requiere Premium) |
-| 6 | Provider SoundCloud (API pública) |
+| **6** | Provider SoundCloud (búsqueda vía yt-dlp `scsearch`) + selector de proveedor en la TUI (tecla `m`, `[general] providers` / `default_provider`) — **completada** |
 | 7 | Provider Apple Music (MusicKit; requiere cuenta de desarrollador) |
 | 8 | Extras: caché de búsquedas, modo radio, publicación en gestores de paquetes |
 

@@ -6,7 +6,9 @@ use anyhow::{Result, bail};
 use shellmusic::app;
 use shellmusic::config::Config;
 use shellmusic::player::mpv::MpvPlayer;
+use shellmusic::providers::soundcloud::SoundcloudProvider;
 use shellmusic::providers::youtube::YoutubeProvider;
+use shellmusic::providers::{MusicProvider, ProviderKind};
 use tokio::process::Command;
 
 #[tokio::main]
@@ -31,7 +33,7 @@ async fn main() -> Result<()> {
         }
     };
     let player = Arc::new(player);
-    let provider = Arc::new(YoutubeProvider::new());
+    let providers = build_providers(&config);
 
     let mut terminal = match ratatui::try_init() {
         Ok(terminal) => terminal,
@@ -40,9 +42,33 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     };
-    let result = app::run(&mut terminal, provider, player, player_events, config).await;
+    let result = app::run(&mut terminal, providers, player, player_events, config).await;
     ratatui::restore();
     result
+}
+
+fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>)> {
+    let mut kinds: Vec<ProviderKind> = config
+        .general
+        .providers
+        .iter()
+        .filter_map(|name| ProviderKind::from_name(name))
+        .collect();
+    if let Some(default) = ProviderKind::from_name(&config.general.default_provider)
+        && let Some(pos) = kinds.iter().position(|kind| *kind == default)
+    {
+        kinds.swap(0, pos);
+    }
+    kinds
+        .into_iter()
+        .map(|kind| {
+            let provider: Arc<dyn MusicProvider> = match kind {
+                ProviderKind::Youtube => Arc::new(YoutubeProvider::new()),
+                ProviderKind::Soundcloud => Arc::new(SoundcloudProvider::new()),
+            };
+            (kind, provider)
+        })
+        .collect()
 }
 
 async fn check_dependencies() -> Result<()> {

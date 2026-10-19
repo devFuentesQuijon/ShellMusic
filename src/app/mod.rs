@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 
 use crate::config::Config;
 use crate::player::{Player, PlayerEvent, PlayerNotice};
-use crate::providers::{MusicProvider, Track};
+use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::tui;
 
 mod input;
@@ -31,12 +31,16 @@ pub(super) enum AppMsg {
 
 pub async fn run(
     terminal: &mut DefaultTerminal,
-    provider: Arc<dyn MusicProvider>,
+    providers: Vec<(ProviderKind, Arc<dyn MusicProvider>)>,
     player: Arc<dyn Player>,
     mut player_events: mpsc::UnboundedReceiver<PlayerEvent>,
     config: Config,
 ) -> Result<()> {
     let mut app = App::new(&config);
+    if !providers.is_empty() {
+        app.providers = providers;
+        app.active_provider = 0;
+    }
     let (tx, mut rx) = mpsc::unbounded_channel::<AppMsg>();
     let mut keys = EventStream::new();
     let fps = u64::from(app.visualizer_fps());
@@ -55,7 +59,7 @@ pub async fn run(
                 if let Some(Ok(Event::Key(key))) = event
                     && key.kind == KeyEventKind::Press
                 {
-                    handle_key(&mut app, key, &provider, &player, &tx);
+                    handle_key(&mut app, key, &player, &tx);
                 }
             }
             _ = tick => {

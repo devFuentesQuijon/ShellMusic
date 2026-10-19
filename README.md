@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/devFuentesQuijon/ShellMusic/actions/workflows/ci.yml/badge.svg)](https://github.com/devFuentesQuijon/ShellMusic/actions/workflows/ci.yml)
 
-TUI ultraliviana para buscar y reproducir música de YouTube Music desde la terminal. Escrita en Rust con ratatui; la reproducción corre a cargo de **mpv** (controlado por JSON IPC) y la búsqueda/resolución de **yt-dlp**.
+TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud desde la terminal. Escrita en Rust con ratatui; la reproducción corre a cargo de **mpv** (controlado por JSON IPC) y la búsqueda/resolución de **yt-dlp**.
 
 ![Demo de ShellMusic](docs/demo.gif)
 
@@ -60,6 +60,7 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
+| m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (YouTube / SoundCloud) |
 | v | Resultados / Cola / Favoritos | Activar / desactivar el visualizador de espectro |
 | Ctrl+C | Global | Salir |
 
@@ -106,6 +107,8 @@ En el primer arranque se crea `config.toml` en la ruta nativa de configuración 
 ```toml
 [general]
 results_per_search = 15   # 1-50
+providers = ["youtube", "soundcloud"]   # proveedores habilitados; la tecla m cicla entre ellos
+default_provider = "youtube"            # proveedor activo al arrancar (debe estar en la lista)
 
 [audio]
 initial_volume = 70       # 0-100
@@ -115,6 +118,8 @@ cookies_from_browser = "auto"   # "auto" | "firefox"/"chrome"/... | "" (nunca us
 player_client = "android"          # cliente de YouTube que emula yt-dlp
 remote_components = "ejs:github"   # solucionador de retos JS de yt-dlp ("" = desactivado)
 ```
+
+Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
 
 ## Bloqueo anti-bot de YouTube
 

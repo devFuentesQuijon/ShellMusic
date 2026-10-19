@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use ratatui::widgets::ListState;
 
 use crate::config::Config;
 use crate::favorites::Favorites;
 use crate::player::PlaybackStatus;
 use crate::playlists::Playlists;
-use crate::providers::Track;
+use crate::providers::youtube::YoutubeProvider;
+use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::queue::Queue;
 use crate::visualizer::Visualizer;
 
@@ -99,6 +102,8 @@ pub struct App {
     pub searching: bool,
     pub should_quit: bool,
     pub visualizer: Option<Visualizer>,
+    pub providers: Vec<(ProviderKind, Arc<dyn MusicProvider>)>,
+    pub active_provider: usize,
     pub(super) results_limit: usize,
     visualizer_cfg: crate::config::Visualizer,
     favorites_path: std::path::PathBuf,
@@ -141,6 +146,8 @@ impl App {
             searching: false,
             should_quit: false,
             visualizer: None,
+            providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
+            active_provider: 0,
             results_limit: config.general.results_per_search,
             visualizer_cfg: config.visualizer.clone(),
             favorites_path,
@@ -180,6 +187,23 @@ impl App {
 
     pub fn visualizer_fps(&self) -> u16 {
         self.visualizer_cfg.fps
+    }
+
+    pub fn active_provider_kind(&self) -> ProviderKind {
+        self.providers
+            .get(self.active_provider)
+            .map_or(ProviderKind::Youtube, |(kind, _)| *kind)
+    }
+
+    pub fn next_provider(&mut self) {
+        if self.providers.is_empty() {
+            return;
+        }
+        self.active_provider = (self.active_provider + 1) % self.providers.len();
+        self.message = Some(Message::info(format!(
+            "Proveedor: {}",
+            self.providers[self.active_provider].0
+        )));
     }
 
     pub(super) fn selected(&self) -> Option<usize> {
