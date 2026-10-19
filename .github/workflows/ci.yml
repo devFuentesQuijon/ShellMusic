@@ -33,3 +33,11 @@ jobs:
 
       - name: Tests (unitarios y de render; los de integración son #[ignore])
         run: cargo test
+
+      - name: Instalar mpv y ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mpv ffmpeg
+
+      - name: Test de integración IPC de mpv (archivo local, sin red)
+        if: runner.os == 'Linux'
+        run: cargo test --locked --test mpv_ipc_local -- --ignored --nocapture

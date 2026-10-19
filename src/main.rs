@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     if !std::io::stdout().is_terminal() {
         eprintln!(
             "ShellMusic necesita un terminal interactivo (TTY) para su interfaz.\n\
-             Ejecuta `shellmusic` directamente en una terminal, sin redirigir la salida."
+             Ejecuta `smusic` directamente en una terminal, sin redirigir la salida."
         );
         std::process::exit(1);
     }
