@@ -62,6 +62,59 @@ impl Message {
     }
 }
 
+/// Sub-modo de la radio: de dónde salen las pistas al agotarse la cola.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RadioMode {
+    /// Pistas del último artista sonado.
+    #[default]
+    Artista,
+    /// Similares a la última pista (mix RD de YouTube; en SoundCloud,
+    /// búsqueda por artista + título).
+    Similares,
+    /// Artista al azar de los favoritos (o género al azar si no hay).
+    Random,
+    /// Palabra clave de género/década al azar.
+    RandomGenero,
+    /// Pistas menos conocidas del último artista (salta los hits).
+    Rarezas,
+}
+
+impl RadioMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Artista => Self::Similares,
+            Self::Similares => Self::Random,
+            Self::Random => Self::RandomGenero,
+            Self::RandomGenero => Self::Rarezas,
+            Self::Rarezas => Self::Artista,
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "artista" => Some(Self::Artista),
+            "similares" => Some(Self::Similares),
+            "random" => Some(Self::Random),
+            "random-genero" => Some(Self::RandomGenero),
+            "rarezas" => Some(Self::Rarezas),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for RadioMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Artista => "artista",
+            Self::Similares => "similares",
+            Self::Random => "random",
+            Self::RandomGenero => "random género",
+            Self::Rarezas => "rarezas",
+        };
+        write!(f, "{name}")
+    }
+}
+
 /// Estado del overlay modal de playlists.
 #[derive(Debug, Clone)]
 pub enum Overlay {
@@ -106,6 +159,7 @@ pub struct App {
     pub providers: Vec<(ProviderKind, Arc<dyn MusicProvider>)>,
     pub active_provider: usize,
     pub radio: bool,
+    pub radio_mode: RadioMode,
     pub played: HashSet<(ProviderKind, String)>,
     /// Títulos normalizados ya reproducidos: la radio no encola otra versión
     /// de la misma canción.
@@ -166,6 +220,7 @@ impl App {
             providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
             active_provider: 0,
             radio: config.radio.enabled,
+            radio_mode: RadioMode::from_name(&config.radio.mode).unwrap_or_default(),
             played: HashSet::new(),
             played_titles: HashSet::new(),
             radio_epoch: 0,
@@ -208,6 +263,16 @@ impl App {
         } else {
             "Modo radio desactivado"
         }));
+    }
+
+    /// Cicla el sub-modo de la radio (tecla R).
+    pub fn next_radio_mode(&mut self) {
+        self.radio_mode = self.radio_mode.next();
+        let note = if self.radio { "" } else { " (radio inactiva: actívala con r)" };
+        self.message = Some(Message::info(format!(
+            "Modo radio: {}{note}",
+            self.radio_mode
+        )));
     }
 
     pub(super) fn selected(&self) -> Option<usize> {
@@ -373,5 +438,55 @@ mod tests {
         app.history_prev();
         app.history_next();
         assert_eq!(app.input, "texto");
+    }
+
+    #[test]
+    fn radio_mode_cycles_through_all() {
+        let mut mode = RadioMode::Artista;
+        let mut seen = vec![mode];
+        for _ in 0..4 {
+            mode = mode.next();
+            seen.push(mode);
+        }
+        assert_eq!(mode.next(), RadioMode::Artista, "el ciclo cierra");
+        assert_eq!(
+            seen,
+            [
+                RadioMode::Artista,
+                RadioMode::Similares,
+                RadioMode::Random,
+                RadioMode::RandomGenero,
+                RadioMode::Rarezas,
+            ]
+        );
+    }
+
+    #[test]
+    fn radio_mode_from_name_roundtrip() {
+        for name in ["artista", "similares", "random", "random-genero", "rarezas"] {
+            assert!(RadioMode::from_name(name).is_some(), "{name}");
+        }
+        assert_eq!(RadioMode::from_name("inventado"), None);
+    }
+
+    #[test]
+    fn radio_mode_config_applies() {
+        let mut config = Config::default();
+        config.radio.mode = "similares".to_string();
+        let app = App::with_data_dir(
+            &config,
+            &std::env::temp_dir().join(format!("shellmusic-radiomode-{}", std::process::id())),
+        )
+        .unwrap();
+        assert_eq!(app.radio_mode, RadioMode::Similares);
+
+        // Modo desconocido → artista (default).
+        config.radio.mode = "inventado".to_string();
+        let app = App::with_data_dir(
+            &config,
+            &std::env::temp_dir().join(format!("shellmusic-radiomode2-{}", std::process::id())),
+        )
+        .unwrap();
+        assert_eq!(app.radio_mode, RadioMode::Artista);
     }
 }

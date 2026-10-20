@@ -25,7 +25,8 @@ enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
 ttl_minutes = 15    # 1-120
 
 [radio]
-enabled = false     # al agotarse la cola, encola pistas del mismo artista (se alterna con la tecla r)
+enabled = false     # al agotarse la cola, encola pistas relacionadas (se alterna con la tecla r)
+mode = \"artista\"    # artista | similares | random | random-genero | rarezas (se cicla con R)
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -106,6 +107,8 @@ impl Default for Cache {
 #[serde(default)]
 pub struct Radio {
     pub enabled: bool,
+    /// artista | similares | random | random-genero | rarezas
+    pub mode: String,
 }
 
 impl Config {

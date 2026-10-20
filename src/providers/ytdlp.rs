@@ -14,8 +14,30 @@ pub(super) async fn search(
     limit: usize,
 ) -> Result<Vec<Track>> {
     let limit = limit.clamp(1, 50);
+    let stdout = run_ytdlp(&[format!("{prefix}{limit}:{query}")]).await?;
+    let tracks = parse_lines(&stdout, provider);
+    if tracks.is_empty() {
+        bail!("sin resultados para «{query}»");
+    }
+    Ok(tracks)
+}
+
+/// La "radio" autogenerada de YouTube para un vídeo (playlist RD<id>):
+/// pistas similares según el algoritmo de YouTube. Fallback del modo
+/// similares de la radio cuando la última pista es de YouTube.
+pub(crate) async fn youtube_mix(video_id: &str) -> Result<Vec<Track>> {
+    let url = format!("https://www.youtube.com/watch?v={video_id}&list=RD{video_id}");
+    let stdout = run_ytdlp(std::slice::from_ref(&url)).await?;
+    let tracks = parse_lines(&stdout, ProviderKind::Youtube);
+    if tracks.is_empty() {
+        bail!("sin mix para «{url}»");
+    }
+    Ok(tracks)
+}
+
+async fn run_ytdlp(args: &[String]) -> Result<String> {
     let output = Command::new("yt-dlp")
-        .arg(format!("{prefix}{limit}:{query}"))
+        .args(args)
         .args(["--dump-json", "--flat-playlist", "--no-warnings"])
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
@@ -27,16 +49,14 @@ pub(super) async fn search(
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("yt-dlp falló: {}", stderr.trim());
     }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let tracks = stdout
+fn parse_lines(stdout: &str, provider: ProviderKind) -> Vec<Track> {
+    stdout
         .lines()
         .filter_map(|line| parse_entry(line, provider))
-        .collect::<Vec<_>>();
-    if tracks.is_empty() {
-        bail!("sin resultados para «{query}»");
-    }
-    Ok(tracks)
+        .collect()
 }
 
 fn parse_entry(line: &str, provider: ProviderKind) -> Option<Track> {

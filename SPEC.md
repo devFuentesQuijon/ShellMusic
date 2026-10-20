@@ -236,7 +236,8 @@ pub trait Player: Send + Sync {
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (cicla los habilitados en `[general] providers`) |
-| r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al agotarse la cola, encola pistas del mismo artista) |
+| r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al agotarse la cola, encola pistas relacionadas) |
+| R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares (mix RD de YouTube) → random (artista al azar de favoritos) → random género (palabra clave al azar) → rarezas (deep cuts del artista) |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
 | Enter / a / A / d / J / K / Esc | Overlay: contenido | Reproducir / encolar / reproducir toda / quitar / reordenar / volver |
 | Enter / Esc | Overlay: añadir a playlist | Añadir a la seleccionada (o crear nueva) / cancelar |
@@ -265,7 +266,8 @@ enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
 ttl_minutes = 15    # 1-120
 
 [radio]
-enabled = false     # al agotarse la cola, encola pistas del mismo artista (se alterna con la tecla r)
+enabled = false     # al agotarse la cola, encola pistas relacionadas (se alterna con la tecla r)
+mode = "artista"    # artista | similares | random | random-genero | rarezas (se cicla con R)
 ```
 
 Si el archivo no existe al primer arranque, se crea con estos valores.
@@ -307,7 +309,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 5 | Provider Spotify — **pospuesta**: desde feb-2026 las apps nuevas en Development Mode exigen que cada usuario cree su propia app de desarrollador y tenga Premium activo ([guía de migración](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)); fricción excesiva para el usuario objetivo |
 | **6** | Provider SoundCloud (búsqueda vía yt-dlp `scsearch`) + selector de proveedor en la TUI (tecla `m`, `[general] providers` / `default_provider`) — **completada** |
 | 7 | Provider Apple Music — **pospuesta**: misma razón que la fase 5, agravada por la cuenta de desarrollador de pago |
-| **8** | Extras: caché de búsquedas en memoria (`[cache]`, decorador `CachingProvider`), modo radio (tecla `r`, `[radio]`, expansión por artista al agotar la cola) y metadatos de publicación en crates.io — **completada** (la publicación en crates.io/Homebrew/scoop queda como paso manual del autor) |
+| **8** | Extras: caché de búsquedas en memoria (`[cache]`, decorador `CachingProvider`), modo radio (tecla `r`, sub-modos con `R`: artista, similares vía mix RD de YouTube, random desde favoritos, random género, rarezas) y metadatos de publicación en crates.io — **completada** (la publicación en crates.io/Homebrew/scoop queda como paso manual del autor) |
 
 ---
 

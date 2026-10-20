@@ -5,11 +5,11 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 
 use crate::player::Player;
-use crate::providers::{ProviderKind, Track};
+use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
-use super::state::{App, Focus, Message};
+use super::state::{App, Focus, Message, RadioMode};
 
 pub(super) fn handle_msg(
     app: &mut App,
@@ -217,21 +217,148 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
 }
 
 const RADIO_TRACKS: usize = 5;
+const RAREZAS_SKIP_HITS: usize = 15;
+
+/// Palabras clave para el modo random por género/década.
+const RANDOM_GENERO_KEYWORDS: &[&str] = &[
+    "80s rock",
+    "90s pop hits",
+    "jazz classics",
+    "lofi hip hop",
+    "70s disco",
+    "classical piano",
+    "reggae roots",
+    "synthwave",
+    "bossa nova",
+    "90s hip hop",
+    "80s heavy metal",
+    "flamenco",
+    "cumbia",
+    "ambient",
+    "70s funk",
+    "2000s indie rock",
+];
 
 fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
-    let Some(artist) = app.queue.current_track().map(|track| track.artist.clone()) else {
+    let Some(track) = app.queue.current_track().cloned() else {
         return;
     };
     let Some((_, provider)) = app.providers.get(app.active_provider).cloned() else {
         return;
     };
-    app.message = Some(Message::info(format!("radio: buscando pistas de «{artist}»…")));
     let epoch = app.radio_epoch;
-    let tx = tx.clone();
     let limit = app.results_limit;
+
+    match app.radio_mode {
+        RadioMode::Artista => {
+            let artist = track.artist.clone();
+            app.message = Some(Message::info(format!("radio: buscando pistas de «{artist}»…")));
+            spawn_radio_search(provider, artist.clone(), artist, limit, 0, false, epoch, tx);
+        }
+        RadioMode::Similares => {
+            if track.provider == ProviderKind::Youtube {
+                // El mix RD de YouTube da similares de verdad; si falla,
+                // fallback a búsqueda del artista dentro de la misma tarea.
+                app.message = Some(Message::info(format!(
+                    "radio: buscando similares a «{}»…",
+                    track.title
+                )));
+                let label = track.artist.clone();
+                let video_id = track.id.clone();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let result = match crate::providers::ytdlp::youtube_mix(&video_id).await {
+                        Ok(tracks) => Ok(tracks),
+                        Err(_) => provider
+                            .search(&label, limit)
+                            .await
+                            .map_err(|e| e.to_string()),
+                    };
+                    let _ = tx.send(AppMsg::RadioDone(label, result, epoch));
+                });
+            } else {
+                // SoundCloud no tiene mix vía yt-dlp: búsqueda artista+título.
+                let query = format!("{} {}", track.artist, track.title);
+                app.message = Some(Message::info(format!(
+                    "radio: buscando similares a «{}»…",
+                    track.title
+                )));
+                spawn_radio_search(provider, track.artist.clone(), query, limit, 0, false, epoch, tx);
+            }
+        }
+        RadioMode::Random => {
+            // Artista al azar de los favoritos; sin favoritos, género al azar.
+            let mut artists: Vec<String> = app
+                .favorites
+                .tracks
+                .iter()
+                .map(|t| t.artist.clone())
+                .collect();
+            artists.sort();
+            artists.dedup();
+            if artists.is_empty() {
+                radio_expand_random_genero(app, provider, epoch, limit, tx);
+            } else {
+                let artist = artists[crate::random::below(artists.len())].clone();
+                app.message = Some(Message::info(format!(
+                    "radio: descubrimiento desde «{artist}»…"
+                )));
+                spawn_radio_search(provider, artist.clone(), artist, limit, 0, true, epoch, tx);
+            }
+        }
+        RadioMode::RandomGenero => {
+            radio_expand_random_genero(app, provider, epoch, limit, tx);
+        }
+        RadioMode::Rarezas => {
+            let artist = track.artist.clone();
+            app.message = Some(Message::info(format!(
+                "radio: buscando rarezas de «{artist}»…"
+            )));
+            // Pide el tope y descarta los primeros hits; baraja el resto.
+            spawn_radio_search(provider, artist.clone(), artist, 50, RAREZAS_SKIP_HITS, true, epoch, tx);
+        }
+    }
+}
+
+fn radio_expand_random_genero(
+    app: &mut App,
+    provider: Arc<dyn MusicProvider>,
+    epoch: u64,
+    limit: usize,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
+    let keyword = RANDOM_GENERO_KEYWORDS[crate::random::below(RANDOM_GENERO_KEYWORDS.len())];
+    app.message = Some(Message::info(format!("radio: azar «{keyword}»…")));
+    spawn_radio_search(provider, keyword.to_string(), keyword.to_string(), limit, 0, true, epoch, tx);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_radio_search(
+    provider: Arc<dyn MusicProvider>,
+    label: String,
+    query: String,
+    limit: usize,
+    skip_hits: usize,
+    shuffle: bool,
+    epoch: u64,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
+    let tx = tx.clone();
     tokio::spawn(async move {
-        let result = provider.search(&artist, limit).await.map_err(|e| e.to_string());
-        let _ = tx.send(AppMsg::RadioDone(artist, result, epoch));
+        let result = provider
+            .search(&query, limit)
+            .await
+            .map_err(|e| e.to_string())
+            .map(|mut tracks| {
+                if skip_hits > 0 && tracks.len() > skip_hits {
+                    tracks.drain(..skip_hits);
+                }
+                if shuffle {
+                    crate::random::shuffle(&mut tracks);
+                }
+                tracks
+            });
+        let _ = tx.send(AppMsg::RadioDone(label, result, epoch));
     });
 }
 

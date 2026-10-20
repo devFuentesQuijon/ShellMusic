@@ -17,7 +17,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             };
             let icon = if app.status.paused { "⏸" } else { "▶" };
             let position = app.queue.current.map_or(0, |index| index + 1);
-            let radio = if app.radio { "  radio:ON" } else { "" };
+            let radio = if app.radio {
+                format!("  radio:ON·{}", app.radio_mode)
+            } else {
+                String::new()
+            };
             let label = format!(
                 "{icon} {} — {}  {}/{}  cola {}/{}  vol:{}{radio}",
                 track.title,
@@ -31,7 +35,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             (ratio, label)
         }
         None => {
-            let radio = if app.radio { " · radio:ON" } else { "" };
+            let radio = if app.radio {
+                format!(" · radio:ON·{}", app.radio_mode)
+            } else {
+                String::new()
+            };
             (
                 0.0,
                 format!("Sin reproducción · vol:{}{radio}", app.status.volume),

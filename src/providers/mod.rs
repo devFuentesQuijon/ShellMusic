@@ -1,7 +1,7 @@
 pub mod cache;
 pub mod soundcloud;
 pub mod youtube;
-mod ytdlp;
+pub(crate) mod ytdlp;
 
 use std::fmt;
 use std::time::Duration;
