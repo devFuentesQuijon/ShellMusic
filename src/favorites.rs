@@ -1,10 +1,10 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::providers::Track;
+use crate::providers::{ProviderKind, Track, track_key};
 
 const VERSION: u32 = 1;
 
@@ -14,27 +14,21 @@ struct FavoritesFile {
     tracks: Vec<Track>,
 }
 
-/// mtime + tamaño para detectar escrituras externas entre carga y guardado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fingerprint {
-    modified: Option<SystemTime>,
-    len: u64,
-}
+/// Contenido del archivo para detectar escrituras externas entre carga y
+/// guardado. Se compara contenido, no mtime: hay sistemas de archivos cuya
+/// granularidad de mtime no distingue dos escrituras rápidas.
+type Fingerprint = Option<String>;
 
-impl Fingerprint {
-    fn capture(path: &Path) -> Option<Self> {
-        let metadata = fs::metadata(path).ok()?;
-        Some(Self {
-            modified: metadata.modified().ok(),
-            len: metadata.len(),
-        })
-    }
+fn capture_fingerprint(path: &Path) -> Fingerprint {
+    fs::read_to_string(path).ok()
 }
 
 #[derive(Debug, Default)]
 pub struct Favorites {
     pub tracks: Vec<Track>,
-    fingerprint: Option<Fingerprint>,
+    fingerprint: Fingerprint,
+    /// Claves del estado al cargar/guardar: base del merge a 3 bandas.
+    base: HashSet<(ProviderKind, String)>,
 }
 
 impl Favorites {
@@ -74,15 +68,17 @@ impl Favorites {
                 )
             }
         };
-        favorites.fingerprint = Fingerprint::capture(path);
+        favorites.fingerprint = capture_fingerprint(path);
+        favorites.base = favorites.tracks.iter().map(track_key).collect();
         Ok((favorites, warning))
     }
 
     /// Escritura atómica bajo lock de archivo: la sección comprobar-huella →
     /// fusionar → escribir → renombrar se serializa entre instancias, y el
     /// temporal es único por escritura. Si el archivo cambió en disco desde
-    /// la última huella conocida (otra instancia), se fusiona por
-    /// (provider, id) en lugar de sobrescribir a ciegas.
+    /// la última huella conocida (otra instancia), se hace merge a 3 bandas
+    /// contra la base: las adiciones de cualquier lado se conservan y las
+    /// eliminaciones de cualquier lado se respetan.
     pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
         use crate::state_file::{SaveLock, unique_tmp_path};
 
@@ -90,14 +86,12 @@ impl Favorites {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        if Fingerprint::capture(path) != self.fingerprint
+        if capture_fingerprint(path) != self.fingerprint
             && let Ok(text) = fs::read_to_string(path)
             && let Ok(file) = serde_json::from_str::<FavoritesFile>(&text)
             && file.version == VERSION
         {
-            for track in file.tracks {
-                self.add(track);
-            }
+            self.merge_external(file.tracks);
         }
         let file = FavoritesFile {
             version: VERSION,
@@ -106,8 +100,29 @@ impl Favorites {
         let tmp = unique_tmp_path(path);
         fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
         fs::rename(&tmp, path)?;
-        self.fingerprint = Fingerprint::capture(path);
+        self.fingerprint = capture_fingerprint(path);
+        self.base = self.tracks.iter().map(track_key).collect();
         Ok(())
+    }
+
+    /// Merge a 3 bandas del estado en disco contra la base y la memoria:
+    /// lo eliminado en cualquiera de los dos lados queda eliminado y lo
+    /// añadido en cualquiera de los dos lados queda añadido.
+    fn merge_external(&mut self, disk: Vec<Track>) {
+        let disk_keys: HashSet<(ProviderKind, String)> = disk.iter().map(track_key).collect();
+        let mem_keys: HashSet<(ProviderKind, String)> = self.tracks.iter().map(track_key).collect();
+        // En base pero ausente del disco → eliminado externamente: fuera.
+        // Ausente de base → añadido localmente: se queda.
+        self.tracks
+            .retain(|t| !self.base.contains(&track_key(t)) || disk_keys.contains(&track_key(t)));
+        for track in disk {
+            let key = track_key(&track);
+            // En disco, ni en memoria ni en base → añadido externamente.
+            // En base y en disco pero no en memoria → eliminado localmente.
+            if !mem_keys.contains(&key) && !self.base.contains(&key) {
+                self.tracks.push(track);
+            }
+        }
     }
 
     pub fn contains(&self, track: &Track) -> bool {
@@ -241,6 +256,30 @@ mod tests {
         assert!(loaded.contains(&track("local")));
         assert!(loaded.contains(&track("externa")));
         assert!(loaded.contains(&track("local-2")));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_respects_external_removals() {
+        let path = temp_path("merge-remove.json");
+        let mut favorites = Favorites::default();
+        favorites.add(track("x"));
+        favorites.save(&path).unwrap();
+
+        // Otra instancia quita "x" y añade "y".
+        let (mut other, _) = Favorites::load(&path).unwrap();
+        other.toggle(&track("x"));
+        other.add(track("y"));
+        other.save(&path).unwrap();
+
+        // Esta instancia añade "z" desde su snapshot viejo y guarda.
+        favorites.add(track("z"));
+        favorites.save(&path).unwrap();
+
+        let (loaded, _) = Favorites::load(&path).unwrap();
+        assert!(!loaded.contains(&track("x")), "la eliminación externa se respeta");
+        assert!(loaded.contains(&track("y")), "la adición externa se conserva");
+        assert!(loaded.contains(&track("z")), "la adición local se conserva");
         let _ = fs::remove_file(&path);
     }
 

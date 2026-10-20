@@ -1,10 +1,10 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::providers::Track;
+use crate::providers::{Track, track_key};
 
 const VERSION: u32 = 1;
 
@@ -20,27 +20,21 @@ struct PlaylistsFile {
     playlists: Vec<Playlist>,
 }
 
-/// mtime + tamaño para detectar escrituras externas entre carga y guardado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fingerprint {
-    modified: Option<SystemTime>,
-    len: u64,
-}
+/// Contenido del archivo para detectar escrituras externas entre carga y
+/// guardado. Se compara contenido, no mtime: hay sistemas de archivos cuya
+/// granularidad de mtime no distingue dos escrituras rápidas.
+type Fingerprint = Option<String>;
 
-impl Fingerprint {
-    fn capture(path: &Path) -> Option<Self> {
-        let metadata = fs::metadata(path).ok()?;
-        Some(Self {
-            modified: metadata.modified().ok(),
-            len: metadata.len(),
-        })
-    }
+fn capture_fingerprint(path: &Path) -> Fingerprint {
+    fs::read_to_string(path).ok()
 }
 
 #[derive(Debug, Default)]
 pub struct Playlists {
     pub items: Vec<Playlist>,
-    fingerprint: Option<Fingerprint>,
+    fingerprint: Fingerprint,
+    /// Snapshot del estado al cargar/guardar: base del merge a 3 bandas.
+    base: Vec<Playlist>,
 }
 
 impl Playlists {
@@ -61,13 +55,17 @@ impl Playlists {
             Err(err) => return Err(err),
         };
         let (mut playlists, warning) = match serde_json::from_str::<PlaylistsFile>(&text) {
-            Ok(file) if file.version == VERSION => (
-                Self {
-                    items: file.playlists,
-                    fingerprint: None,
-                },
-                None,
-            ),
+            Ok(file) if file.version == VERSION => {
+                let base = file.playlists.clone();
+                (
+                    Self {
+                        items: file.playlists,
+                        fingerprint: None,
+                        base,
+                    },
+                    None,
+                )
+            }
             _ => {
                 let backup = path.with_extension("json.bak");
                 let _ = fs::rename(path, &backup);
@@ -80,16 +78,17 @@ impl Playlists {
                 )
             }
         };
-        playlists.fingerprint = Fingerprint::capture(path);
+        playlists.fingerprint = capture_fingerprint(path);
         Ok((playlists, warning))
     }
 
     /// Escritura atómica bajo lock de archivo: la sección comprobar-huella →
     /// fusionar → escribir → renombrar se serializa entre instancias, y el
     /// temporal es único por escritura. Si el archivo cambió en disco desde
-    /// la última huella conocida (otra instancia), se fusiona por nombre: las
-    /// playlists externas nuevas se conservan y el contenido en memoria tiene
-    /// precedencia sobre las de igual nombre.
+    /// la última huella conocida (otra instancia), se hace merge a 3 bandas
+    /// contra la base, a nivel de playlist (por nombre) y de pista dentro de
+    /// cada playlist: las adiciones de cualquier lado se conservan y las
+    /// eliminaciones de cualquier lado se respetan.
     pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
         use crate::state_file::{SaveLock, unique_tmp_path};
 
@@ -97,16 +96,12 @@ impl Playlists {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        if Fingerprint::capture(path) != self.fingerprint
+        if capture_fingerprint(path) != self.fingerprint
             && let Ok(text) = fs::read_to_string(path)
             && let Ok(file) = serde_json::from_str::<PlaylistsFile>(&text)
             && file.version == VERSION
         {
-            for playlist in file.playlists {
-                if !self.items.iter().any(|p| p.name == playlist.name) {
-                    self.items.push(playlist);
-                }
-            }
+            self.merge_external(file.playlists);
         }
         let file = PlaylistsFile {
             version: VERSION,
@@ -115,8 +110,43 @@ impl Playlists {
         let tmp = unique_tmp_path(path);
         fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
         fs::rename(&tmp, path)?;
-        self.fingerprint = Fingerprint::capture(path);
+        self.fingerprint = capture_fingerprint(path);
+        self.base = self.items.clone();
         Ok(())
+    }
+
+    /// Merge a 3 bandas del estado en disco contra la base y la memoria.
+    /// A nivel de playlist: lo borrado en cualquier lado queda borrado y lo
+    /// añadido en cualquier lado se conserva. Dentro de cada playlist
+    /// presente en los tres estados, mismo criterio por pista. Una playlist
+    /// nueva con el mismo nombre en ambos lados: gana la de memoria.
+    fn merge_external(&mut self, disk: Vec<Playlist>) {
+        let base_names: HashSet<&str> = self.base.iter().map(|p| p.name.as_str()).collect();
+        let disk_names: HashSet<&str> = disk.iter().map(|p| p.name.as_str()).collect();
+        // En base y en memoria pero ya no en disco → eliminada externamente.
+        // Ausente de base → añadida localmente: se queda.
+        self.items
+            .retain(|p| !base_names.contains(p.name.as_str()) || disk_names.contains(p.name.as_str()));
+
+        for disk_playlist in disk {
+            match self.items.iter_mut().find(|p| p.name == disk_playlist.name) {
+                Some(local) => {
+                    // Presente en ambos lados: fusionar pistas si hay base
+                    // común; si es nueva en ambos lados, gana la memoria.
+                    if let Some(base_playlist) =
+                        self.base.iter().find(|p| p.name == disk_playlist.name)
+                    {
+                        merge_tracks(&base_playlist.tracks, &mut local.tracks, &disk_playlist.tracks);
+                    }
+                }
+                None if !base_names.contains(disk_playlist.name.as_str()) => {
+                    // En disco, ni en memoria ni en base → añadida externamente.
+                    // (En base y en disco pero no en memoria → borrada localmente.)
+                    self.items.push(disk_playlist);
+                }
+                None => {}
+            }
+        }
     }
 
     /// Crea una playlist con nombre único (tras recortar espacios).
@@ -180,6 +210,22 @@ impl Playlists {
         }
         playlist.tracks.swap(track, track + 1);
         true
+    }
+}
+
+/// Merge a 3 bandas de pistas dentro de una playlist: lo eliminado de base
+/// por cualquiera de los dos lados queda eliminado; lo añadido por cualquiera
+/// de los dos lados se conserva.
+fn merge_tracks(base: &[Track], mem: &mut Vec<Track>, disk: &[Track]) {
+    let base_keys: HashSet<_> = base.iter().map(track_key).collect();
+    let disk_keys: HashSet<_> = disk.iter().map(track_key).collect();
+    let mem_keys: HashSet<_> = mem.iter().map(track_key).collect();
+    mem.retain(|t| !base_keys.contains(&track_key(t)) || disk_keys.contains(&track_key(t)));
+    for track in disk {
+        let key = track_key(track);
+        if !mem_keys.contains(&key) && !base_keys.contains(&key) {
+            mem.push(track.clone());
+        }
     }
 }
 
@@ -294,8 +340,8 @@ mod tests {
         other.add_track(0, track("ajena"));
         other.save(&path).unwrap();
 
-        // Esta instancia guarda sin saberlo: conserva la playlist externa y
-        // su propio contenido manda en la de nombre compartido.
+        // Esta instancia guarda sin saberlo: conserva la playlist externa y,
+        // en la de nombre compartido, fusiona las pistas de ambos lados.
         let pl = playlists.create("local-2").unwrap();
         playlists.add_track(pl, track("nueva"));
         playlists.save(&path).unwrap();
@@ -305,8 +351,40 @@ mod tests {
         let names: Vec<&str> = loaded.items.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["local", "local-2", "externa"]);
         let local = loaded.items.iter().find(|p| p.name == "local").unwrap();
-        assert_eq!(local.tracks.len(), 1);
-        assert_eq!(local.tracks[0].id, "mía");
+        let ids: Vec<&str> = local.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["mía", "ajena"]);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_respects_external_removals() {
+        let path = temp_path("merge-remove.json");
+        let mut playlists = Playlists::default();
+        let mix = playlists.create("mix").unwrap();
+        playlists.add_track(mix, track("x"));
+        playlists.add_track(mix, track("y"));
+        playlists.create("borrada").unwrap();
+        playlists.save(&path).unwrap();
+
+        // Otra instancia borra la playlist "borrada" y quita la pista "x".
+        let (mut other, _) = Playlists::load(&path).unwrap();
+        let idx = other.items.iter().position(|p| p.name == "borrada").unwrap();
+        other.delete(idx).unwrap();
+        other.remove_track(0, 0).unwrap();
+        other.save(&path).unwrap();
+
+        // Esta instancia añade "z" a "mix" desde su snapshot viejo y guarda.
+        playlists.add_track(0, track("z"));
+        playlists.save(&path).unwrap();
+
+        let (loaded, _) = Playlists::load(&path).unwrap();
+        assert!(
+            !loaded.items.iter().any(|p| p.name == "borrada"),
+            "la playlist eliminada externamente no resucita"
+        );
+        let mix = loaded.items.iter().find(|p| p.name == "mix").unwrap();
+        let ids: Vec<&str> = mix.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["y", "z"], "el borrado externo de pista se respeta y la adición local se conserva");
         let _ = fs::remove_file(&path);
     }
 

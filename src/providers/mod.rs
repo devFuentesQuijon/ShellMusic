@@ -45,6 +45,11 @@ pub struct Track {
     pub provider: ProviderKind,
 }
 
+/// Clave de identidad de una pista para dedupe y merges de estado local.
+pub(crate) fn track_key(track: &Track) -> (ProviderKind, String) {
+    (track.provider, track.id.clone())
+}
+
 #[async_trait]
 pub trait MusicProvider: Send + Sync {
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<Track>>;
