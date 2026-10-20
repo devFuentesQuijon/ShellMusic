@@ -1,16 +1,22 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
 
 use crate::player::Player;
-use crate::providers::Track;
+use crate::providers::{ProviderKind, Track};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
 use super::state::{App, Focus, Message};
 
-pub(super) fn handle_msg(app: &mut App, msg: AppMsg) {
+pub(super) fn handle_msg(
+    app: &mut App,
+    msg: AppMsg,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
     match msg {
         AppMsg::SearchDone(Ok(tracks)) => {
             app.searching = false;
@@ -32,6 +38,32 @@ pub(super) fn handle_msg(app: &mut App, msg: AppMsg) {
             if app.message.as_ref().is_some_and(|m| !m.is_error) {
                 app.message = None;
             }
+        }
+        AppMsg::RadioDone(artist, Ok(tracks)) => {
+            let candidates = radio_candidates(&tracks, &app.queue, &app.played, RADIO_TRACKS);
+            if candidates.is_empty() {
+                app.message = Some(Message::info(format!(
+                    "radio: sin pistas nuevas de «{artist}»; fin de la cola"
+                )));
+                return;
+            }
+            let count = candidates.len();
+            let mut first = None;
+            for track in candidates {
+                let index = app.queue.add(track);
+                first.get_or_insert(index);
+            }
+            if let Some(first) = first {
+                app.message = Some(Message::info(format!(
+                    "Radio: {count} pistas relacionadas con {artist}"
+                )));
+                play_queue_track(app, player, tx, first);
+            }
+        }
+        AppMsg::RadioDone(artist, Err(err)) => {
+            app.message = Some(Message::error(format!(
+                "radio: búsqueda de «{artist}» fallida: {err}"
+            )));
         }
     }
 }
@@ -103,6 +135,10 @@ pub(super) fn play_queue_track(
         return;
     }
     app.queue.current = Some(index);
+    app.played.insert((
+        app.queue.tracks[index].provider,
+        app.queue.tracks[index].id.clone(),
+    ));
     app.queue_select(index);
     app.message = Some(Message::info(format!(
         "cargando «{}»…",
@@ -141,11 +177,50 @@ pub(super) fn play_adjacent(
 }
 
 pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>) {
-    if let Some(index) = app.queue.next_index()
-        && app.queue.current.is_some()
-    {
-        play_queue_track(app, player, tx, index);
+    if app.queue.current.is_none() {
+        return;
     }
+    if let Some(index) = app.queue.next_index() {
+        play_queue_track(app, player, tx, index);
+        return;
+    }
+    if app.radio {
+        radio_expand(app, tx);
+    }
+}
+
+const RADIO_TRACKS: usize = 5;
+
+fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
+    let Some(artist) = app.queue.current_track().map(|track| track.artist.clone()) else {
+        return;
+    };
+    let Some((_, provider)) = app.providers.get(app.active_provider).cloned() else {
+        return;
+    };
+    app.message = Some(Message::info(format!("radio: buscando pistas de «{artist}»…")));
+    let tx = tx.clone();
+    let limit = app.results_limit;
+    tokio::spawn(async move {
+        let result = provider.search(&artist, limit).await.map_err(|e| e.to_string());
+        let _ = tx.send(AppMsg::RadioDone(artist, result));
+    });
+}
+
+fn radio_candidates(
+    results: &[Track],
+    queue: &Queue,
+    played: &HashSet<(ProviderKind, String)>,
+    max: usize,
+) -> Vec<Track> {
+    results
+        .iter()
+        .filter(|track| {
+            !played.contains(&(track.provider, track.id.clone())) && queue.contains(track).is_none()
+        })
+        .take(max)
+        .cloned()
+        .collect()
 }
 
 pub(super) fn remove_from_queue(
@@ -210,4 +285,47 @@ pub(super) fn spawn_player<F, Fut>(
             let _ = tx.send(AppMsg::Error(format!("error del reproductor: {err}")));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(id: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            title: format!("título {id}"),
+            artist: "artista".to_string(),
+            duration: None,
+            source_url: format!("https://example.com/{id}"),
+            provider: ProviderKind::Youtube,
+        }
+    }
+
+    #[test]
+    fn radio_candidates_excludes_played_and_queued() {
+        let mut queue = Queue::new();
+        queue.add(track("en-cola"));
+        let played: HashSet<(ProviderKind, String)> =
+            [(ProviderKind::Youtube, "vista".to_string())].into_iter().collect();
+        let results = vec![
+            track("vista"),
+            track("en-cola"),
+            track("nueva-1"),
+            track("nueva-2"),
+        ];
+        let candidates = radio_candidates(&results, &queue, &played, 5);
+        let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["nueva-1", "nueva-2"]);
+    }
+
+    #[test]
+    fn radio_candidates_respects_max_and_order() {
+        let queue = Queue::new();
+        let played = HashSet::new();
+        let results: Vec<Track> = (0..8).map(|i| track(&i.to_string())).collect();
+        let candidates = radio_candidates(&results, &queue, &played, 5);
+        let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["0", "1", "2", "3", "4"]);
+    }
 }

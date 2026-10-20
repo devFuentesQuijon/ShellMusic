@@ -24,6 +24,13 @@ remote_components = \"ejs:github\"   # permite a yt-dlp resolver los retos JS de
 enabled = false   # espectro animado (solo Linux; captura el audio del sistema)
 bands = 24        # 8-64
 fps = 20          # 5-60
+
+[cache]
+enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
+ttl_minutes = 15    # 1-120
+
+[radio]
+enabled = false     # al agotarse la cola, encola pistas del mismo artista (se alterna con la tecla r)
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -33,6 +40,8 @@ pub struct Config {
     pub audio: Audio,
     pub youtube: Youtube,
     pub visualizer: Visualizer,
+    pub cache: Cache,
+    pub radio: Radio,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -101,6 +110,28 @@ impl Default for Visualizer {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Cache {
+    pub enabled: bool,
+    pub ttl_minutes: u64,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl_minutes: 15,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Radio {
+    pub enabled: bool,
+}
+
 impl Config {
     pub fn path() -> Result<PathBuf> {
         let base = dirs::config_dir()
@@ -140,6 +171,7 @@ impl Config {
         config.youtube.remote_components = config.youtube.remote_components.trim().to_string();
         config.visualizer.bands = config.visualizer.bands.clamp(8, 64);
         config.visualizer.fps = config.visualizer.fps.clamp(5, 60);
+        config.cache.ttl_minutes = config.cache.ttl_minutes.clamp(1, 120);
         Ok(config)
     }
 }

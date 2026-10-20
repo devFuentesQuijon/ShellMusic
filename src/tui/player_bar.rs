@@ -17,8 +17,9 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             };
             let icon = if app.status.paused { "⏸" } else { "▶" };
             let position = app.queue.current.map_or(0, |index| index + 1);
+            let radio = if app.radio { "  radio:ON" } else { "" };
             let label = format!(
-                "{icon} {} — {}  {}/{}  cola {}/{}  vol:{}",
+                "{icon} {} — {}  {}/{}  cola {}/{}  vol:{}{radio}",
                 track.title,
                 track.artist,
                 fmt_duration(app.status.position),
@@ -29,10 +30,13 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             );
             (ratio, label)
         }
-        None => (
-            0.0,
-            format!("Sin reproducción · vol:{}", app.status.volume),
-        ),
+        None => {
+            let radio = if app.radio { " · radio:ON" } else { "" };
+            (
+                0.0,
+                format!("Sin reproducción · vol:{}{radio}", app.status.volume),
+            )
+        }
     };
     let gauge = Gauge::default()
         .block(Block::bordered().title("Reproductor"))

@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 description = "TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud (mpv + yt-dlp)"
 license = "MIT"
+repository = "https://github.com/devFuentesQuijon/ShellMusic"
+homepage = "https://github.com/devFuentesQuijon/ShellMusic"
+readme = "README.md"
+keywords = ["music", "tui", "youtube", "soundcloud", "terminal"]
+categories = ["command-line-utilities", "multimedia::audio"]
+exclude = ["/.github", "/docs", "/scripts"]
 
 [[bin]]
 name = "smusic"

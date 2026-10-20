@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod soundcloud;
 pub mod youtube;
 mod ytdlp;
@@ -9,7 +10,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProviderKind {
     Youtube,
     Soundcloud,

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use ratatui::widgets::ListState;
@@ -104,6 +105,8 @@ pub struct App {
     pub visualizer: Option<Visualizer>,
     pub providers: Vec<(ProviderKind, Arc<dyn MusicProvider>)>,
     pub active_provider: usize,
+    pub radio: bool,
+    pub played: HashSet<(ProviderKind, String)>,
     pub(super) results_limit: usize,
     visualizer_cfg: crate::config::Visualizer,
     favorites_path: std::path::PathBuf,
@@ -148,6 +151,8 @@ impl App {
             visualizer: None,
             providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
             active_provider: 0,
+            radio: config.radio.enabled,
+            played: HashSet::new(),
             results_limit: config.general.results_per_search,
             visualizer_cfg: config.visualizer.clone(),
             favorites_path,
@@ -204,6 +209,15 @@ impl App {
             "Proveedor: {}",
             self.providers[self.active_provider].0
         )));
+    }
+
+    pub fn toggle_radio(&mut self) {
+        self.radio = !self.radio;
+        self.message = Some(Message::info(if self.radio {
+            "Modo radio activado"
+        } else {
+            "Modo radio desactivado"
+        }));
     }
 
     pub(super) fn selected(&self) -> Option<usize> {

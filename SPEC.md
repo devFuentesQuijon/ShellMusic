@@ -237,6 +237,7 @@ pub trait Player: Send + Sync {
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (cicla los habilitados en `[general] providers`) |
+| r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al agotarse la cola, encola pistas del mismo artista) |
 | v | Resultados / Cola / Favoritos | Activar / desactivar el visualizador de espectro |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
 | Enter / a / A / d / J / K / Esc | Overlay: contenido | Reproducir / encolar / reproducir toda / quitar / reordenar / volver |
@@ -265,6 +266,13 @@ remote_components = "ejs:github"   # permite a yt-dlp resolver los retos JS de f
 enabled = false   # espectro animado (solo Linux; captura el audio del sistema)
 bands = 24        # 8-64
 fps = 20          # 5-60
+
+[cache]
+enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
+ttl_minutes = 15    # 1-120
+
+[radio]
+enabled = false     # al agotarse la cola, encola pistas del mismo artista (se alterna con la tecla r)
 ```
 
 Si el archivo no existe al primer arranque, se crea con estos valores.
@@ -294,7 +302,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build, clippy (`-D warnings`) y tests en Linux, macOS y Windows en cada push/PR a `main`. En Linux se instalan además mpv+ffmpeg y corre el test de integración IPC local (`tests/mpv_ipc_local.rs`, sin red).
 - **Integración nocturna**: `.github/workflows/nightly.yml` corre a diario (04:23 UTC, también manual con `workflow_dispatch`) los tests que necesitan red: búsqueda real en YouTube (`tests/youtube_search.rs`), búsqueda real en SoundCloud (`tests/soundcloud_search.rs`) y detalle de error de mpv/yt-dlp (`tests/mpv_ipc.rs::mpv_reports_stderr_detail_on_failure`). Si falla una ejecución programada, se abre un issue automáticamente. Quedan excluidos a propósito los tests que requieren navegador con sesión de YouTube, reproducción real (el anti-bot bloquea IPs de datacenter) o stack de audio (PipeWire/PulseAudio).
 - **Releases**: al pushear un tag `v*` (`.github/workflows/release.yml`) se compilan y publican en GitHub Releases los binarios `smusic-linux-x86_64`, `smusic-macos-aarch64` y `smusic-windows-x86_64.exe`.
-- **Futuro**: publicación en crates.io, fórmula Homebrew, paquete scoop.
+- **Futuro**: publicación en gestores de paquetes. Los metadatos de crates.io ya están en `Cargo.toml` (`repository`, `homepage`, `readme`, `keywords`, `categories`, `exclude` de docs/scripts/CI) y `cargo package --list` produce un paquete limpio; quedan como pasos manuales del autor: `cargo publish` (requiere cuenta en crates.io), fórmula Homebrew (tap propio o PR a homebrew-core) y manifiesto scoop (bucket propio o PR a ScoopInstaller/Extras).
 
 ---
 
@@ -310,7 +318,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 5 | Provider Spotify — **pospuesta**: desde feb-2026 las apps nuevas en Development Mode exigen que cada usuario cree su propia app de desarrollador y tenga Premium activo ([guía de migración](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)); fricción excesiva para el usuario objetivo |
 | **6** | Provider SoundCloud (búsqueda vía yt-dlp `scsearch`) + selector de proveedor en la TUI (tecla `m`, `[general] providers` / `default_provider`) — **completada** |
 | 7 | Provider Apple Music — **pospuesta**: misma razón que la fase 5, agravada por la cuenta de desarrollador de pago |
-| 8 | Extras: caché de búsquedas, modo radio, publicación en gestores de paquetes |
+| **8** | Extras: caché de búsquedas en memoria (`[cache]`, decorador `CachingProvider`), modo radio (tecla `r`, `[radio]`, expansión por artista al agotar la cola) y metadatos de publicación en crates.io — **completada** (la publicación en crates.io/Homebrew/scoop queda como paso manual del autor) |
 
 ---
 

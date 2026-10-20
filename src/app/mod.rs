@@ -27,6 +27,7 @@ pub(super) enum AppMsg {
     SearchDone(Result<Vec<Track>, String>),
     Error(String),
     PlaybackStarted,
+    RadioDone(String, Result<Vec<Track>, String>),
 }
 
 pub async fn run(
@@ -67,7 +68,7 @@ pub async fn run(
                     app.status = status;
                 }
             }
-            Some(msg) = rx.recv() => handle_msg(&mut app, msg),
+            Some(msg) = rx.recv() => handle_msg(&mut app, msg, &player, &tx),
             Some(event) = player_events.recv() => match event {
                 PlayerEvent::Notice(PlayerNotice { text, is_error }) => {
                     app.message = Some(Message { text, is_error });

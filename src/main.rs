@@ -1,11 +1,13 @@
 use std::io::IsTerminal;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use shellmusic::app;
 use shellmusic::config::Config;
 use shellmusic::player::mpv::MpvPlayer;
+use shellmusic::providers::cache::CachingProvider;
 use shellmusic::providers::soundcloud::SoundcloudProvider;
 use shellmusic::providers::youtube::YoutubeProvider;
 use shellmusic::providers::{MusicProvider, ProviderKind};
@@ -65,6 +67,15 @@ fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>
             let provider: Arc<dyn MusicProvider> = match kind {
                 ProviderKind::Youtube => Arc::new(YoutubeProvider::new()),
                 ProviderKind::Soundcloud => Arc::new(SoundcloudProvider::new()),
+            };
+            let provider = if config.cache.enabled {
+                Arc::new(CachingProvider::new(
+                    provider,
+                    kind,
+                    Duration::from_secs(config.cache.ttl_minutes * 60),
+                )) as Arc<dyn MusicProvider>
+            } else {
+                provider
             };
             (kind, provider)
         })

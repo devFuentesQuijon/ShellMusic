@@ -61,6 +61,7 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (YouTube / SoundCloud) |
+| r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio |
 | v | Resultados / Cola / Favoritos | Activar / desactivar el visualizador de espectro |
 | Ctrl+C | Global | Salir |
 
@@ -117,9 +118,24 @@ initial_volume = 70       # 0-100
 cookies_from_browser = "auto"   # "auto" | "firefox"/"chrome"/... | "" (nunca usar cookies)
 player_client = "android"          # cliente de YouTube que emula yt-dlp
 remote_components = "ejs:github"   # solucionador de retos JS de yt-dlp ("" = desactivado)
+
+[cache]
+enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
+ttl_minutes = 15    # 1-120
+
+[radio]
+enabled = false     # modo radio activo al arrancar (se alterna con la tecla r)
 ```
 
 Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
+
+## Caché de búsquedas
+
+Las búsquedas se cachean en memoria durante la sesión (sección `[cache]`): repetir la misma búsqueda en el mismo proveedor no vuelve a invocar yt-dlp hasta que expira el TTL. No se guarda nada en disco.
+
+## Modo radio
+
+Con `r` activas el modo radio (estado inicial configurable en `[radio] enabled`; la barra del reproductor muestra `radio:ON`). Cuando la cola se agota al terminar la última pista, ShellMusic busca el artista de esa pista en el proveedor activo y encola hasta 5 pistas relacionadas, excluyendo las ya reproducidas en la sesión y las ya encoladas. Si no hay nada nuevo, la reproducción se detiene con un aviso.
 
 ## Bloqueo anti-bot de YouTube
 
