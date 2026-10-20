@@ -45,7 +45,17 @@ pub(super) fn handle_msg(
             if !app.radio || epoch != app.radio_epoch {
                 return;
             }
-            let candidates = radio_candidates(&tracks, &app.queue, &app.played, RADIO_TRACKS);
+            // Títulos ya ocupados: los de la cola más los ya reproducidos,
+            // para no encolar otra versión de la misma canción.
+            let mut occupied: HashSet<String> = app
+                .queue
+                .tracks
+                .iter()
+                .map(|t| normalize_title(&t.title, &t.artist))
+                .collect();
+            occupied.extend(app.played_titles.iter().cloned());
+            let candidates =
+                radio_candidates(&tracks, &app.queue, &app.played, &occupied, RADIO_TRACKS);
             if candidates.is_empty() {
                 app.message = Some(Message::info(format!(
                     "radio: sin pistas nuevas de «{artist}»; fin de la cola"
@@ -149,6 +159,10 @@ pub(super) fn play_queue_track(
         app.queue.tracks[index].provider,
         app.queue.tracks[index].id.clone(),
     ));
+    app.played_titles.insert(normalize_title(
+        &app.queue.tracks[index].title,
+        &app.queue.tracks[index].artist,
+    ));
     app.queue_select(index);
     app.message = Some(Message::info(format!(
         "cargando «{}»…",
@@ -218,17 +232,56 @@ fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     });
 }
 
+/// Normaliza un título para deduplicar versiones de la misma canción en la
+/// radio: minúsculas, sin segmentos entre () ni [], sin el nombre del
+/// artista, solo alfanumérico y espacios colapsados. Si queda vacío, se usa
+/// el título original en minúsculas para no colapsar títulos raros.
+fn normalize_title(title: &str, artist: &str) -> String {
+    let mut stripped = String::with_capacity(title.len());
+    let mut depth = 0u32;
+    for c in title.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => stripped.push(c),
+            _ => {}
+        }
+    }
+    let mut normalized = stripped.to_lowercase();
+    let artist_lower = artist.to_lowercase();
+    if artist_lower.chars().count() > 2 {
+        normalized = normalized.replace(&artist_lower, " ");
+    }
+    let normalized: String = normalized
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if normalized.is_empty() {
+        title.to_lowercase()
+    } else {
+        normalized
+    }
+}
+
 fn radio_candidates(
     results: &[Track],
     queue: &Queue,
     played: &HashSet<(ProviderKind, String)>,
+    occupied_titles: &HashSet<String>,
     max: usize,
 ) -> Vec<Track> {
+    let mut seen = occupied_titles.clone();
     results
         .iter()
         .filter(|track| {
             !played.contains(&(track.provider, track.id.clone())) && queue.contains(track).is_none()
         })
+        // seen.insert devuelve false si el título normalizado ya salió:
+        // deduplica contra la cola/reproducidas y dentro de la propia tanda.
+        .filter(|track| seen.insert(normalize_title(&track.title, &track.artist)))
         .take(max)
         .cloned()
         .collect()
@@ -326,7 +379,7 @@ mod tests {
             track("nueva-1"),
             track("nueva-2"),
         ];
-        let candidates = radio_candidates(&results, &queue, &played, 5);
+        let candidates = radio_candidates(&results, &queue, &played, &HashSet::new(), 5);
         let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["nueva-1", "nueva-2"]);
     }
@@ -336,9 +389,67 @@ mod tests {
         let queue = Queue::new();
         let played = HashSet::new();
         let results: Vec<Track> = (0..8).map(|i| track(&i.to_string())).collect();
-        let candidates = radio_candidates(&results, &queue, &played, 5);
+        let candidates = radio_candidates(&results, &queue, &played, &HashSet::new(), 5);
         let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["0", "1", "2", "3", "4"]);
+    }
+
+    #[test]
+    fn normalize_title_strips_versions_and_artist() {
+        assert_eq!(
+            normalize_title("Enjoy the Silence", "Depeche Mode"),
+            "enjoy the silence"
+        );
+        assert_eq!(
+            normalize_title("Enjoy the Silence (2006 Remaster)", "Depeche Mode"),
+            "enjoy the silence"
+        );
+        assert_eq!(
+            normalize_title("Depeche Mode - Enjoy The Silence [Official Video]", "Depeche Mode"),
+            "enjoy the silence"
+        );
+        // Títulos distintos no colapsan
+        assert_ne!(
+            normalize_title("Enjoy the Silence", "Depeche Mode"),
+            normalize_title("Personal Jesus", "Depeche Mode")
+        );
+        // Normalización vacía: cae al título original para no colapsar todo
+        assert_eq!(normalize_title("(((", "x"), "(((".to_lowercase());
+    }
+
+    #[test]
+    fn radio_candidates_dedupes_song_versions() {
+        let queue = Queue::new();
+        let played = HashSet::new();
+        let mut enjoy1 = track("v1");
+        enjoy1.title = "Enjoy the Silence".to_string();
+        enjoy1.artist = "Depeche Mode".to_string();
+        let mut enjoy2 = track("v2");
+        enjoy2.title = "Enjoy the Silence (2006 Remaster)".to_string();
+        enjoy2.artist = "Depeche Mode".to_string();
+        let mut enjoy3 = track("v3");
+        enjoy3.title = "Depeche Mode - Enjoy The Silence [Official Video]".to_string();
+        enjoy3.artist = "Depeche Mode".to_string();
+        let mut other = track("v4");
+        other.title = "Personal Jesus".to_string();
+        other.artist = "Depeche Mode".to_string();
+
+        let results = vec![enjoy1, enjoy2, enjoy3, other];
+        let candidates = radio_candidates(&results, &queue, &played, &HashSet::new(), 5);
+        let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["v1", "v4"], "solo una versión por canción");
+
+        // Y si ya sonó una versión, ninguna otra entra.
+        let occupied: HashSet<String> = ["enjoy the silence".to_string()].into_iter().collect();
+        let mut r1 = track("v1");
+        r1.title = "Enjoy the Silence (Live)".to_string();
+        r1.artist = "Depeche Mode".to_string();
+        let mut r2 = track("v2");
+        r2.title = "Policy of Truth".to_string();
+        r2.artist = "Depeche Mode".to_string();
+        let candidates = radio_candidates(&[r1, r2], &queue, &played, &occupied, 5);
+        let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["v2"]);
     }
 
     struct MockPlayer;

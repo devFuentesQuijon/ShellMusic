@@ -106,6 +106,9 @@ pub struct App {
     pub active_provider: usize,
     pub radio: bool,
     pub played: HashSet<(ProviderKind, String)>,
+    /// Títulos normalizados ya reproducidos: la radio no encola otra versión
+    /// de la misma canción.
+    pub played_titles: HashSet<String>,
     pub radio_epoch: u64,
     pub(super) results_limit: usize,
     favorites_path: std::path::PathBuf,
@@ -153,6 +156,7 @@ impl App {
             active_provider: 0,
             radio: config.radio.enabled,
             played: HashSet::new(),
+            played_titles: HashSet::new(),
             radio_epoch: 0,
             results_limit: config.general.results_per_search,
             favorites_path,
