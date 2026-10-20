@@ -235,38 +235,56 @@ def _run_demo():
     send_keys(child, stream, screen, renderer, frames, "f", settle=0.8)
     hold(stream, screen, renderer, frames, 0.5)
 
-    # 7. Switch to queue panel (Tab) — show queue content
+    # 7. Switch provider to SoundCloud (m)
+    send_keys(child, stream, screen, renderer, frames, "m", settle=0.5)
+    hold(stream, screen, renderer, frames, 1.2)
+
+    # 8. Re-run the same search on SoundCloud: focus search (/) + Enter
+    send_keys(child, stream, screen, renderer, frames, "/", settle=0.3)
+    send_keys(child, stream, screen, renderer, frames, "\r", settle=0.5)
+    feed_and_capture(child, stream, screen, renderer, frames, 5.0)
+    hold(stream, screen, renderer, frames, 2.0)
+
+    # 9. Add a SoundCloud track to the queue
+    send_keys(child, stream, screen, renderer, frames, "a", settle=0.8)
+    hold(stream, screen, renderer, frames, 0.5)
+
+    # 10. Toggle radio mode (r)
+    send_keys(child, stream, screen, renderer, frames, "r", settle=0.5)
+    hold(stream, screen, renderer, frames, 1.2)
+
+    # 11. Switch to queue panel (Tab) — show queue content
     send_keys(child, stream, screen, renderer, frames, "\t", settle=0.5)
     hold(stream, screen, renderer, frames, 1.5)
 
-    # 8. Switch to favorites panel (Tab) — show favorites
+    # 12. Switch to favorites panel (Tab) — show favorites
     send_keys(child, stream, screen, renderer, frames, "\t", settle=0.5)
     hold(stream, screen, renderer, frames, 1.5)
 
-    # 9. Switch back to results (Tab)
+    # 13. Switch back to results (Tab)
     send_keys(child, stream, screen, renderer, frames, "\t", settle=0.5)
     hold(stream, screen, renderer, frames, 0.5)
 
-    # 10. Try to play (Enter) — shows player bar even if mpv fails
+    # 14. Try to play (Enter) — shows player bar even if mpv fails
     send_keys(child, stream, screen, renderer, frames, "\r", settle=1.5)
     feed_and_capture(child, stream, screen, renderer, frames, 3.0)
     hold(stream, screen, renderer, frames, 2.0)
 
-    # 11. Volume up a couple times
+    # 15. Volume up a couple times
     send_keys(child, stream, screen, renderer, frames, "+", settle=0.3)
     send_keys(child, stream, screen, renderer, frames, "+", settle=0.3)
     send_keys(child, stream, screen, renderer, frames, "+", settle=0.3)
     hold(stream, screen, renderer, frames, 0.8)
 
-    # 12. Open playlists overlay
+    # 16. Open playlists overlay
     send_keys(child, stream, screen, renderer, frames, "P", settle=0.8)
     hold(stream, screen, renderer, frames, 1.5)
 
-    # 13. Close overlay
+    # 17. Close overlay
     send_keys(child, stream, screen, renderer, frames, "\x1b", settle=0.5)
     hold(stream, screen, renderer, frames, 0.8)
 
-    # 14. Quit
+    # 18. Quit
     send_keys(child, stream, screen, renderer, frames, "q", settle=0.5)
     feed_and_capture(child, stream, screen, renderer, frames, 1.0)
 
