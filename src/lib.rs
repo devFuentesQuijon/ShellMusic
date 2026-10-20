@@ -2,6 +2,7 @@ pub mod app;
 pub mod browsers;
 pub mod config;
 pub mod favorites;
+pub mod history;
 pub mod player;
 pub mod playlists;
 pub mod providers;

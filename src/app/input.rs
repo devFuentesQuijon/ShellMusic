@@ -34,8 +34,16 @@ pub(super) fn handle_key(
     match app.focus {
         Focus::Searching => match key.code {
             KeyCode::Enter => submit_search(app, tx),
-            KeyCode::Esc | KeyCode::Tab => app.focus = Focus::Browsing,
-            KeyCode::BackTab => app.focus = Focus::Favorites,
+            KeyCode::Esc | KeyCode::Tab => {
+                app.history_reset();
+                app.focus = Focus::Browsing;
+            }
+            KeyCode::BackTab => {
+                app.history_reset();
+                app.focus = Focus::Favorites;
+            }
+            KeyCode::Up => app.history_prev(),
+            KeyCode::Down => app.history_next(),
             KeyCode::Backspace => {
                 app.input.pop();
             }

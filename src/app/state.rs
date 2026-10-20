@@ -6,6 +6,7 @@ use ratatui::widgets::ListState;
 
 use crate::config::Config;
 use crate::favorites::Favorites;
+use crate::history::History;
 use crate::player::PlaybackStatus;
 use crate::playlists::Playlists;
 use crate::providers::youtube::YoutubeProvider;
@@ -113,6 +114,13 @@ pub struct App {
     pub(super) results_limit: usize,
     favorites_path: std::path::PathBuf,
     playlists_path: std::path::PathBuf,
+    pub history: History,
+    /// Posición al navegar el historial con ↑/↓; None = editando texto nuevo.
+    history_index: Option<usize>,
+    /// Borrador del input al empezar a navegar el historial; se restaura al
+    /// bajar más allá de la búsqueda más reciente.
+    history_draft: String,
+    history_path: std::path::PathBuf,
 }
 
 impl App {
@@ -126,10 +134,13 @@ impl App {
     pub fn with_data_dir(config: &Config, data_dir: &std::path::Path) -> anyhow::Result<Self> {
         let favorites_path = data_dir.join("favorites.json");
         let playlists_path = data_dir.join("playlists.json");
+        let history_path = data_dir.join("history.json");
         let (favorites, fav_warning) = Favorites::load(&favorites_path)
             .with_context(|| format!("no se pudieron leer {}", favorites_path.display()))?;
         let (playlists, pl_warning) = Playlists::load(&playlists_path)
             .with_context(|| format!("no se pudieron leer {}", playlists_path.display()))?;
+        let (history, hist_warning) = History::load(&history_path)
+            .with_context(|| format!("no se pudo leer {}", history_path.display()))?;
         let mut app = Self {
             focus: Focus::Searching,
             input: String::new(),
@@ -149,7 +160,7 @@ impl App {
                 volume: config.audio.initial_volume,
                 ..PlaybackStatus::default()
             },
-            message: fav_warning.or(pl_warning).map(Message::error),
+            message: fav_warning.or(pl_warning).or(hist_warning).map(Message::error),
             searching: false,
             should_quit: false,
             providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
@@ -161,6 +172,10 @@ impl App {
             results_limit: config.general.results_per_search,
             favorites_path,
             playlists_path,
+            history,
+            history_index: None,
+            history_draft: String::new(),
+            history_path,
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
@@ -261,5 +276,102 @@ impl App {
                 "no se pudieron guardar las playlists: {err}"
             )));
         }
+    }
+
+    /// ↑ en la caja de búsqueda: baja por el historial hacia lo más antiguo.
+    pub fn history_prev(&mut self) {
+        if self.history.entries.is_empty() {
+            return;
+        }
+        match self.history_index {
+            None => {
+                self.history_draft = self.input.clone();
+                self.history_index = Some(self.history.entries.len() - 1);
+            }
+            Some(0) => return,
+            Some(index) => self.history_index = Some(index - 1),
+        }
+        if let Some(index) = self.history_index {
+            self.input = self.history.entries[index].clone();
+        }
+    }
+
+    /// ↓ en la caja de búsqueda: sube hacia lo más reciente; al pasar de la
+    /// última entrada restaura el borrador que se estaba escribiendo.
+    pub fn history_next(&mut self) {
+        let Some(index) = self.history_index else {
+            return;
+        };
+        if index + 1 < self.history.entries.len() {
+            self.history_index = Some(index + 1);
+            self.input = self.history.entries[index + 1].clone();
+        } else {
+            self.history_index = None;
+            self.input = self.history_draft.clone();
+        }
+    }
+
+    /// Sale de la navegación del historial (al cambiar de foco o buscar).
+    pub(super) fn history_reset(&mut self) {
+        self.history_index = None;
+        self.history_draft.clear();
+    }
+
+    pub(super) fn save_history(&mut self) {
+        if let Err(err) = self.history.save(&self.history_path) {
+            self.message = Some(Message::error(format!(
+                "no se pudo guardar el historial: {err}"
+            )));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app_with_history(entries: &[&str]) -> App {
+        let mut app = App::with_data_dir(
+            &Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-hist-nav-{}", std::process::id())),
+        )
+        .unwrap();
+        for entry in entries {
+            app.history.push(entry);
+        }
+        app
+    }
+
+    #[test]
+    fn history_navigation_recalls_and_restores_draft() {
+        let mut app = app_with_history(&["primera", "segunda", "tercera"]);
+        app.input = "borrador".to_string();
+
+        app.history_prev();
+        assert_eq!(app.input, "tercera");
+        app.history_prev();
+        assert_eq!(app.input, "segunda");
+        app.history_prev();
+        assert_eq!(app.input, "primera");
+        // Tope: la más antigua no baja más.
+        app.history_prev();
+        assert_eq!(app.input, "primera");
+
+        app.history_next();
+        assert_eq!(app.input, "segunda");
+        app.history_next();
+        assert_eq!(app.input, "tercera");
+        // Pasar de la más reciente restaura el borrador.
+        app.history_next();
+        assert_eq!(app.input, "borrador");
+    }
+
+    #[test]
+    fn history_navigation_with_empty_history_does_nothing() {
+        let mut app = app_with_history(&[]);
+        app.input = "texto".to_string();
+        app.history_prev();
+        app.history_next();
+        assert_eq!(app.input, "texto");
     }
 }

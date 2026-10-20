@@ -90,6 +90,7 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-19 | Vista de contenido de playlist (en el overlay): `Enter` reproduce la pista (y la añade a la cola, sin cerrar el overlay), `a` la encola sin interrumpir, `d` la quita, `J`/`K` reordenan, `A` reproduce la playlist entera (encola todo y suena la primera), `Esc` vuelve a la lista. | Alta |
 | RF-20 | `A` sobre una pista (Resultados/Cola/Favoritos) abre el selector "añadir a playlist" (playlists existentes + "nueva playlist…"); dedup por (provider, id) dentro de la playlist. Nombres de playlist únicos: duplicado → error amable en la línea de estado. | Alta |
 | RF-21 | Las playlists persisten en `playlists.json` (mismo dir de datos, mismo formato con `version`, escritura atómica, corrupto → `.bak` + aviso, sin panic). El overlay es modal: captura todas las teclas salvo Ctrl+C. | Alta |
+| RF-22 | Con la caja de búsqueda enfocada, `↑`/`↓` recorren el historial de búsquedas (estilo shell: al bajar de la más reciente se restaura el borrador en curso). Persisten las últimas 50 en `history.json` (mismo dir de datos, mismo formato y escritura atómica que favoritos/playlists). | Media |
 
 ### Flujo de usuario principal
 
@@ -213,6 +214,7 @@ pub trait Player: Send + Sync {
 | Tecla | Contexto | Acción |
 |---|---|---|
 | Texto + Enter | Búsqueda | Ejecutar búsqueda |
+| ↑ / ↓ | Búsqueda | Navegar el historial de búsquedas (con borrador restaurable) |
 | Esc / Tab | Búsqueda | Pasar a resultados |
 | Tab / Shift+Tab | Global (fuera de edición) | Ciclar foco: Búsqueda → Resultados → Cola → Favoritos |
 | ↑ / ↓ (o k / j) | Resultados / Cola / Favoritos | Mover selección |

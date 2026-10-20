@@ -40,6 +40,7 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | Tecla | Contexto | Acción |
 |---|---|---|
 | Texto + Enter | Búsqueda | Ejecutar búsqueda |
+| ↑ / ↓ | Búsqueda | Navegar el historial de búsquedas recientes (al bajar de la más reciente se restaura lo que estabas escribiendo) |
 | Esc / Tab | Búsqueda | Pasar a resultados |
 | Tab / Shift+Tab | Resultados / Cola / Favoritos | Ciclar foco: Búsqueda → Resultados → Cola → Favoritos |
 | ↑ / ↓ (o k / j) | Resultados / Cola / Favoritos | Mover selección |
@@ -131,6 +132,10 @@ Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para S
 ## Caché de búsquedas
 
 Las búsquedas se cachean en memoria durante la sesión (sección `[cache]`): repetir la misma búsqueda en el mismo proveedor no vuelve a invocar yt-dlp hasta que expira el TTL. No se guarda nada en disco.
+
+## Historial de búsquedas
+
+Con la caja de búsqueda enfocada, `↑`/`↓` recorren las búsquedas recientes (como el historial de un shell): `↑` va hacia las más antiguas y, al bajar con `↓` más allá de la más reciente, se restaura lo que estabas escribiendo. Se guardan las últimas 50 en `history.json` junto a `favorites.json`, con la misma escritura atómica.
 
 ## Modo radio
 

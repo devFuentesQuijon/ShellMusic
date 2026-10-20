@@ -118,6 +118,9 @@ pub(super) fn submit_search(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     let Some((_, provider)) = app.providers.get(app.active_provider).cloned() else {
         return;
     };
+    app.history.push(&query);
+    app.history_reset();
+    app.save_history();
     app.searching = true;
     app.message = Some(Message::info(format!("buscando «{query}»…")));
     let tx = tx.clone();
