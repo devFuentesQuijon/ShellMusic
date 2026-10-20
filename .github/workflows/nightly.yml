@@ -5,7 +5,6 @@ name: Integración nocturna
 # Quedan fuera a propósito (no viables en runners de GitHub):
 # - mpv_ipc::mpv_plays_youtube_track... y mpv_auto::* — requieren navegador con
 #   sesión de YouTube o reproducción real (anti-bot bloquea IPs de datacenter)
-# - visualizer_audio — requiere PipeWire/PulseAudio con sink real
 
 on:
   schedule:

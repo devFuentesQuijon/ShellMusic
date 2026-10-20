@@ -212,7 +212,6 @@ fn playback_key(
         }
         KeyCode::Char('m') => app.next_provider(),
         KeyCode::Char('r') => app.toggle_radio(),
-        KeyCode::Char('v') => app.toggle_visualizer(),
         _ => {}
     }
 }

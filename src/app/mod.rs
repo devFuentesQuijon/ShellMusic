@@ -44,17 +44,10 @@ pub async fn run(
     }
     let (tx, mut rx) = mpsc::unbounded_channel::<AppMsg>();
     let mut keys = EventStream::new();
-    let fps = u64::from(app.visualizer_fps());
 
     loop {
         terminal.draw(|frame| tui::draw(frame, &mut app))?;
-        // Con el visualizador activo el tick sube a su fps; si no, 500 ms.
-        let tick_period = if app.visualizer.is_some() {
-            Duration::from_millis(1000 / fps)
-        } else {
-            TICK
-        };
-        let tick = tokio::time::sleep(tick_period);
+        let tick = tokio::time::sleep(TICK);
         tokio::select! {
             event = keys.next() => {
                 if let Some(Ok(Event::Key(key))) = event

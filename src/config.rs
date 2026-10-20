@@ -20,11 +20,6 @@ cookies_from_browser = \"auto\"   # \"auto\": primero sin cookies y, si YouTube 
 player_client = \"android\"          # cliente de YouTube que yt-dlp emula (\"android\" evita el 403 por PO Token; \"\" = cliente por defecto)
 remote_components = \"ejs:github\"   # permite a yt-dlp resolver los retos JS de firma (\"\" = desactivado)
 
-[visualizer]
-enabled = false   # espectro animado (solo Linux; captura el audio del sistema)
-bands = 24        # 8-64
-fps = 20          # 5-60
-
 [cache]
 enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
 ttl_minutes = 15    # 1-120
@@ -39,7 +34,6 @@ pub struct Config {
     pub general: General,
     pub audio: Audio,
     pub youtube: Youtube,
-    pub visualizer: Visualizer,
     pub cache: Cache,
     pub radio: Radio,
 }
@@ -88,24 +82,6 @@ impl Default for Youtube {
             cookies_from_browser: "auto".to_string(),
             player_client: "android".to_string(),
             remote_components: "ejs:github".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct Visualizer {
-    pub enabled: bool,
-    pub bands: usize,
-    pub fps: u16,
-}
-
-impl Default for Visualizer {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            bands: 24,
-            fps: 20,
         }
     }
 }
@@ -169,8 +145,6 @@ impl Config {
         config.youtube.cookies_from_browser = config.youtube.cookies_from_browser.trim().to_string();
         config.youtube.player_client = config.youtube.player_client.trim().to_string();
         config.youtube.remote_components = config.youtube.remote_components.trim().to_string();
-        config.visualizer.bands = config.visualizer.bands.clamp(8, 64);
-        config.visualizer.fps = config.visualizer.fps.clamp(5, 60);
         config.cache.ttl_minutes = config.cache.ttl_minutes.clamp(1, 120);
         Ok(config)
     }

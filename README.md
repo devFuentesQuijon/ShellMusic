@@ -62,7 +62,6 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (YouTube / SoundCloud) |
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio |
-| v | Resultados / Cola / Favoritos | Activar / desactivar el visualizador de espectro |
 | Ctrl+C | Global | Salir |
 
 Con el overlay de playlists abierto (modal; captura todas las teclas salvo Ctrl+C):
@@ -159,16 +158,3 @@ Requieren `mpv`, `yt-dlp` y acceso a red:
 ```sh
 cargo test -- --ignored
 ```
-
-## Visualizador de espectro (opcional, solo Linux)
-
-`v` activa una franja de barras animadas sobre la barra del reproductor. Desactivado por defecto para ahorrar recursos; también configurable:
-
-```toml
-[visualizer]
-enabled = false   # arrancar con el visualizador activo
-bands = 24        # 8-64
-fps = 20          # 5-60
-```
-
-Requiere `parec` (PipeWire/PulseAudio; con fallback a `pw-cat`). **Limitaciones conocidas**: solo funciona en Linux (en otros SO `v` muestra un aviso) y captura el monitor del sink por defecto, es decir, **todo el audio del sistema**, no solo el de ShellMusic. Con el visualizador apagado no hay subproceso de captura ni coste de redibujado extra (el render vuelve a 500 ms por tick).

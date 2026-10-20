@@ -10,7 +10,6 @@ use crate::playlists::Playlists;
 use crate::providers::youtube::YoutubeProvider;
 use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::queue::Queue;
-use crate::visualizer::Visualizer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -102,13 +101,11 @@ pub struct App {
     pub message: Option<Message>,
     pub searching: bool,
     pub should_quit: bool,
-    pub visualizer: Option<Visualizer>,
     pub providers: Vec<(ProviderKind, Arc<dyn MusicProvider>)>,
     pub active_provider: usize,
     pub radio: bool,
     pub played: HashSet<(ProviderKind, String)>,
     pub(super) results_limit: usize,
-    visualizer_cfg: crate::config::Visualizer,
     favorites_path: std::path::PathBuf,
     playlists_path: std::path::PathBuf,
 }
@@ -148,50 +145,18 @@ impl App {
             message: fav_warning.or(pl_warning).map(Message::error),
             searching: false,
             should_quit: false,
-            visualizer: None,
             providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
             active_provider: 0,
             radio: config.radio.enabled,
             played: HashSet::new(),
             results_limit: config.general.results_per_search,
-            visualizer_cfg: config.visualizer.clone(),
             favorites_path,
             playlists_path,
         };
-        if config.visualizer.enabled {
-            app.toggle_visualizer();
-        }
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
         }
         app
-    }
-
-    pub fn toggle_visualizer(&mut self) {
-        if self.visualizer.is_some() {
-            self.visualizer = None;
-            self.message = Some(Message::info("visualizador desactivado"));
-            return;
-        }
-        if !cfg!(target_os = "linux") {
-            self.message = Some(Message::info(
-                "visualizador solo disponible en Linux por ahora",
-            ));
-            return;
-        }
-        match Visualizer::start(self.visualizer_cfg.bands) {
-            Ok(visualizer) => {
-                self.visualizer = Some(visualizer);
-                self.message = Some(Message::info("visualizador activado"));
-            }
-            Err(err) => {
-                self.message = Some(Message::error(format!("visualizador no disponible: {err}")));
-            }
-        }
-    }
-
-    pub fn visualizer_fps(&self) -> u16 {
-        self.visualizer_cfg.fps
     }
 
     pub fn active_provider_kind(&self) -> ProviderKind {

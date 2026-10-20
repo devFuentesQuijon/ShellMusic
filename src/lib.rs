@@ -7,4 +7,3 @@ pub mod playlists;
 pub mod providers;
 pub mod queue;
 pub mod tui;
-pub mod visualizer;

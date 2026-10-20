@@ -90,7 +90,6 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-19 | Vista de contenido de playlist (en el overlay): `Enter` reproduce la pista (y la añade a la cola, sin cerrar el overlay), `a` la encola sin interrumpir, `d` la quita, `J`/`K` reordenan, `A` reproduce la playlist entera (encola todo y suena la primera), `Esc` vuelve a la lista. | Alta |
 | RF-20 | `A` sobre una pista (Resultados/Cola/Favoritos) abre el selector "añadir a playlist" (playlists existentes + "nueva playlist…"); dedup por (provider, id) dentro de la playlist. Nombres de playlist únicos: duplicado → error amable en la línea de estado. | Alta |
 | RF-21 | Las playlists persisten en `playlists.json` (mismo dir de datos, mismo formato con `version`, escritura atómica, corrupto → `.bak` + aviso, sin panic). El overlay es modal: captura todas las teclas salvo Ctrl+C. | Alta |
-| RF-22 | Visualizador de espectro opcional (tecla `v`, desactivado por defecto): barras animadas por FFT del audio del sistema vía monitor del sink de PipeWire/PulseAudio (`parec`, fallback `pw-cat`). Solo Linux. El subproceso de captura solo existe mientras está activo; con el visualizador apagado el tick de render es 500 ms y activo sube a `fps`. | Media |
 
 ### Flujo de usuario principal
 
@@ -154,7 +153,6 @@ src/
 ├── queue.rs           # cola de reproducción (añadir, eliminar, reordenar, actual)
 ├── favorites.rs       # favoritos locales (persistencia JSON atómica)
 ├── playlists.rs       # playlists locales (persistencia JSON atómica)
-├── visualizer.rs      # captura de audio + FFT + bandas (espectro)
 ├── browsers.rs        # detección de navegadores instalados (cookies anti-bot)
 ├── providers/
 │   ├── mod.rs         # trait MusicProvider + tipos Track + ProviderKind
@@ -170,7 +168,6 @@ src/
     ├── queue.rs       # panel de cola de reproducción
     ├── favorites.rs   # panel de favoritos
     ├── playlists.rs   # overlay modal de playlists
-    ├── visualizer.rs  # franja de espectro (barras animadas)
     └── player_bar.rs  # progreso, volumen, track actual, posición en cola
 ```
 
@@ -238,7 +235,6 @@ pub trait Player: Send + Sync {
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (cicla los habilitados en `[general] providers`) |
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al agotarse la cola, encola pistas del mismo artista) |
-| v | Resultados / Cola / Favoritos | Activar / desactivar el visualizador de espectro |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
 | Enter / a / A / d / J / K / Esc | Overlay: contenido | Reproducir / encolar / reproducir toda / quitar / reordenar / volver |
 | Enter / Esc | Overlay: añadir a playlist | Añadir a la seleccionada (o crear nueva) / cancelar |
@@ -262,11 +258,6 @@ cookies_from_browser = "auto"   # "auto": primero sin cookies y, si YouTube bloq
 player_client = "android"          # cliente de YouTube que yt-dlp emula ("android" evita el 403 por PO Token; "" = cliente por defecto)
 remote_components = "ejs:github"   # permite a yt-dlp resolver los retos JS de firma ("" = desactivado)
 
-[visualizer]
-enabled = false   # espectro animado (solo Linux; captura el audio del sistema)
-bands = 24        # 8-64
-fps = 20          # 5-60
-
 [cache]
 enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
 ttl_minutes = 15    # 1-120
@@ -276,10 +267,6 @@ enabled = false     # al agotarse la cola, encola pistas del mismo artista (se a
 ```
 
 Si el archivo no existe al primer arranque, se crea con estos valores.
-
-### Visualizador (RF-22)
-
-Franja de barras animadas (FFT de 2048 muestras, ventana Hann, 24 bandas log-espaciadas 30 Hz–16 kHz, escala dB, suavizado ataque rápido/caída lenta) sobre la barra del player. **Solo Linux**: captura el monitor del sink por defecto con `parec` (fallback `pw-cat`), por lo que recoge TODO el audio del sistema, no solo el de ShellMusic. En macOS/Windows, `v` muestra un aviso y no activa nada. El subproceso de captura se crea al activar y se mata al desactivar o salir; apagado no consume recursos de captura ni de redibujado extra.
 
 ### Nota sobre el bloqueo anti-bot de YouTube
 
