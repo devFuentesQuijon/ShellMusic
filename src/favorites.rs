@@ -78,10 +78,15 @@ impl Favorites {
         Ok((favorites, warning))
     }
 
-    /// Escritura atómica: archivo temporal + rename. Si el archivo cambió en
-    /// disco desde la última huella conocida (otra instancia), se fusiona por
+    /// Escritura atómica bajo lock de archivo: la sección comprobar-huella →
+    /// fusionar → escribir → renombrar se serializa entre instancias, y el
+    /// temporal es único por escritura. Si el archivo cambió en disco desde
+    /// la última huella conocida (otra instancia), se fusiona por
     /// (provider, id) en lugar de sobrescribir a ciegas.
     pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
+        use crate::state_file::{SaveLock, unique_tmp_path};
+
+        let _lock = SaveLock::acquire(path)?;
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
@@ -98,7 +103,7 @@ impl Favorites {
             version: VERSION,
             tracks: self.tracks.clone(),
         };
-        let tmp = path.with_extension("json.tmp");
+        let tmp = unique_tmp_path(path);
         fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
         fs::rename(&tmp, path)?;
         self.fingerprint = Fingerprint::capture(path);

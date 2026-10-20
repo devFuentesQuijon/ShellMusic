@@ -6,4 +6,5 @@ pub mod player;
 pub mod playlists;
 pub mod providers;
 pub mod queue;
+pub mod state_file;
 pub mod tui;

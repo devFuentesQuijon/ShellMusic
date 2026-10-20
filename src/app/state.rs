@@ -183,6 +183,7 @@ impl App {
 
     pub fn toggle_radio(&mut self) {
         self.radio = !self.radio;
+        self.radio_epoch += 1;
         self.message = Some(Message::info(if self.radio {
             "Modo radio activado"
         } else {

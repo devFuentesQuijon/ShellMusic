@@ -32,18 +32,9 @@ fn ipc_server_path() -> PathBuf {
         .join(format!(
             "shellmusic-mpv-{}-{instance}-{:016x}",
             std::process::id(),
-            random_suffix()
+            crate::state_file::random_suffix()
         ))
         .join("mpv.sock")
-}
-
-/// Aleatorio por proceso sin dependencias: las claves de RandomState se
-/// generan con semilla del SO en cada llamada.
-fn random_suffix() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    std::collections::hash_map::RandomState::new()
-        .build_hasher()
-        .finish()
 }
 
 #[cfg(windows)]
@@ -52,7 +43,7 @@ fn ipc_server_path() -> PathBuf {
     PathBuf::from(format!(
         r"\\.\pipe\shellmusic-mpv-{}-{instance}-{:016x}",
         std::process::id(),
-        random_suffix()
+        crate::state_file::random_suffix()
     ))
 }
 

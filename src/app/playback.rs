@@ -40,9 +40,9 @@ pub(super) fn handle_msg(
             }
         }
         AppMsg::RadioDone(artist, Ok(tracks), epoch) => {
-            // Si el usuario detuvo o reprodujo otra cosa mientras buscábamos,
-            // la expansión quedó obsoleta y se descarta.
-            if epoch != app.radio_epoch {
+            // Si el usuario detuvo, reprodujo otra cosa o desactivó la radio
+            // mientras buscábamos, la expansión quedó obsoleta y se descarta.
+            if !app.radio || epoch != app.radio_epoch {
                 return;
             }
             let candidates = radio_candidates(&tracks, &app.queue, &app.played, RADIO_TRACKS);
@@ -66,7 +66,7 @@ pub(super) fn handle_msg(
             }
         }
         AppMsg::RadioDone(artist, Err(err), epoch) => {
-            if epoch != app.radio_epoch {
+            if !app.radio || epoch != app.radio_epoch {
                 return;
             }
             app.message = Some(Message::error(format!(
@@ -396,5 +396,31 @@ mod tests {
         );
         assert_eq!(app.queue.len(), 2);
         assert_eq!(app.queue.current, Some(0));
+    }
+
+    #[tokio::test]
+    async fn radio_done_after_radio_disabled_is_ignored() {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-radio2-test-{}", std::process::id())),
+        )
+        .unwrap();
+        app.radio = true;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let results = vec![track("x"), track("y")];
+
+        // El usuario desactiva la radio con la búsqueda en vuelo: toggle
+        // invalida el epoch y el flag, así que el resultado se descarta.
+        let epoch = app.radio_epoch;
+        app.toggle_radio();
+        handle_msg(
+            &mut app,
+            AppMsg::RadioDone("artista".to_string(), Ok(results), epoch),
+            &player,
+            &tx,
+        );
+        assert!(app.queue.is_empty());
+        assert_eq!(app.queue.current, None);
     }
 }
