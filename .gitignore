@@ -17,3 +17,8 @@ desktop.ini
 
 # Entorno
 .env
+
+# Herramientas de análisis y skills de agente (locales, no se distribuyen)
+.deepsec/
+.agents/
+skills-lock.json

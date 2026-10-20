@@ -27,7 +27,7 @@ pub(super) enum AppMsg {
     SearchDone(Result<Vec<Track>, String>),
     Error(String),
     PlaybackStarted,
-    RadioDone(String, Result<Vec<Track>, String>),
+    RadioDone(String, Result<Vec<Track>, String>, u64),
 }
 
 pub async fn run(
@@ -37,7 +37,7 @@ pub async fn run(
     mut player_events: mpsc::UnboundedReceiver<PlayerEvent>,
     config: Config,
 ) -> Result<()> {
-    let mut app = App::new(&config);
+    let mut app = App::new(&config)?;
     if !providers.is_empty() {
         app.providers = providers;
         app.active_provider = 0;

@@ -28,18 +28,31 @@ type IpcStream = tokio::net::windows::named_pipe::NamedPipeClient;
 #[cfg(unix)]
 fn ipc_server_path() -> PathBuf {
     let instance = INSTANCE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "shellmusic-mpv-{}-{instance}.sock",
-        std::process::id()
-    ))
+    std::env::temp_dir()
+        .join(format!(
+            "shellmusic-mpv-{}-{instance}-{:016x}",
+            std::process::id(),
+            random_suffix()
+        ))
+        .join("mpv.sock")
+}
+
+/// Aleatorio por proceso sin dependencias: las claves de RandomState se
+/// generan con semilla del SO en cada llamada.
+fn random_suffix() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
 }
 
 #[cfg(windows)]
 fn ipc_server_path() -> PathBuf {
     let instance = INSTANCE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     PathBuf::from(format!(
-        r"\\.\pipe\shellmusic-mpv-{}-{instance}",
-        std::process::id()
+        r"\\.\pipe\shellmusic-mpv-{}-{instance}-{:016x}",
+        std::process::id(),
+        random_suffix()
     ))
 }
 
@@ -151,8 +164,17 @@ impl MpvPlayer {
         extra_args: &[&str],
     ) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
         let socket_path = ipc_server_path();
+        // El socket vive en un directorio privado 0700 para que otro usuario
+        // local no pueda suplantarlo y capturar el canal IPC.
         #[cfg(unix)]
-        let _ = std::fs::remove_file(&socket_path);
+        if let Some(dir) = socket_path.parent() {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)
+                .context("no se pudo crear el directorio del socket IPC")?;
+        }
 
         let mut command = Command::new("mpv");
         command.kill_on_drop(true);
@@ -377,7 +399,12 @@ impl Drop for MpvPlayer {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
         #[cfg(unix)]
-        let _ = std::fs::remove_file(&self.socket_path);
+        {
+            let _ = std::fs::remove_file(&self.socket_path);
+            if let Some(dir) = self.socket_path.parent() {
+                let _ = std::fs::remove_dir(dir);
+            }
+        }
         #[cfg(not(unix))]
         let _ = &self.socket_path;
     }
@@ -587,5 +614,30 @@ mod tests {
         for message in ["This video is unavailable", "tiempo de espera agotado", "desconocido"] {
             assert!(!is_block_error(message), "no debería ser bloqueo: {message}");
         }
+    }
+
+    #[test]
+    fn ipc_paths_do_not_collide_between_instances() {
+        let first = ipc_server_path();
+        let second = ipc_server_path();
+        assert_ne!(first, second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ipc_socket_lives_in_private_dir() {
+        let path = ipc_server_path();
+        let dir = path.parent().unwrap();
+        assert_eq!(dir.parent(), Some(std::env::temp_dir().as_path()));
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .unwrap();
+        let mode = std::fs::metadata(dir).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(mode.mode() & 0o777, 0o700);
+        let _ = std::fs::remove_dir(dir);
     }
 }

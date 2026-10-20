@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -13,9 +14,27 @@ struct FavoritesFile {
     tracks: Vec<Track>,
 }
 
+/// mtime + tamaño para detectar escrituras externas entre carga y guardado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fingerprint {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+impl Fingerprint {
+    fn capture(path: &Path) -> Option<Self> {
+        let metadata = fs::metadata(path).ok()?;
+        Some(Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        })
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Favorites {
     pub tracks: Vec<Track>,
+    fingerprint: Option<Fingerprint>,
 }
 
 impl Favorites {
@@ -25,11 +44,17 @@ impl Favorites {
 
     /// Carga favoritos; ante archivo corrupto o de versión incompatible lo
     /// aparta a `.bak` y empieza vacío, devolviendo un aviso para la UI.
-    pub fn load(path: &Path) -> (Self, Option<String>) {
-        let Ok(text) = fs::read_to_string(path) else {
-            return (Self::default(), None); // no existe aún
+    /// Un error de lectura distinto de "no existe" se propaga: continuar con
+    /// estado vacío dejaría que un guardado posterior borrara el archivo.
+    pub fn load(path: &Path) -> std::io::Result<(Self, Option<String>)> {
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((Self::default(), None));
+            }
+            Err(err) => return Err(err),
         };
-        match serde_json::from_str::<FavoritesFile>(&text) {
+        let (mut favorites, warning) = match serde_json::from_str::<FavoritesFile>(&text) {
             Ok(file) if file.version == VERSION => {
                 let mut favorites = Self::default();
                 for track in file.tracks {
@@ -48,13 +73,26 @@ impl Favorites {
                     )),
                 )
             }
-        }
+        };
+        favorites.fingerprint = Fingerprint::capture(path);
+        Ok((favorites, warning))
     }
 
-    /// Escritura atómica: archivo temporal + rename.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    /// Escritura atómica: archivo temporal + rename. Si el archivo cambió en
+    /// disco desde la última huella conocida (otra instancia), se fusiona por
+    /// (provider, id) en lugar de sobrescribir a ciegas.
+    pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
+        }
+        if Fingerprint::capture(path) != self.fingerprint
+            && let Ok(text) = fs::read_to_string(path)
+            && let Ok(file) = serde_json::from_str::<FavoritesFile>(&text)
+            && file.version == VERSION
+        {
+            for track in file.tracks {
+                self.add(track);
+            }
         }
         let file = FavoritesFile {
             version: VERSION,
@@ -63,6 +101,7 @@ impl Favorites {
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
         fs::rename(&tmp, path)?;
+        self.fingerprint = Fingerprint::capture(path);
         Ok(())
     }
 
@@ -150,7 +189,7 @@ mod tests {
         favorites.add(track("b"));
         favorites.save(&path).unwrap();
 
-        let (loaded, warning) = Favorites::load(&path);
+        let (loaded, warning) = Favorites::load(&path).unwrap();
         assert!(warning.is_none());
         assert_eq!(loaded.tracks.len(), 2);
         assert!(loaded.contains(&track("a")));
@@ -161,16 +200,50 @@ mod tests {
 
     #[test]
     fn missing_file_loads_empty_without_warning() {
-        let (loaded, warning) = Favorites::load(&temp_path("inexistente.json"));
+        let (loaded, warning) = Favorites::load(&temp_path("inexistente.json")).unwrap();
         assert!(loaded.tracks.is_empty());
         assert!(warning.is_none());
+    }
+
+    #[test]
+    fn read_error_propagates() {
+        // Un directorio en el lugar del archivo produce un error de lectura
+        // distinto de NotFound: debe propagarse, no cargar vacío.
+        let path = temp_path("es-directorio.json");
+        fs::create_dir_all(&path).unwrap();
+        assert!(Favorites::load(&path).is_err());
+        let _ = fs::remove_dir(&path);
+    }
+
+    #[test]
+    fn save_merges_external_changes() {
+        let path = temp_path("merge.json");
+        let mut favorites = Favorites::default();
+        favorites.add(track("local"));
+        favorites.save(&path).unwrap();
+
+        // Otra instancia modifica el archivo por detrás.
+        let (mut other, _) = Favorites::load(&path).unwrap();
+        other.add(track("externa"));
+        other.save(&path).unwrap();
+
+        // Esta instancia guarda sin saberlo: unión, no sobrescritura.
+        favorites.add(track("local-2"));
+        favorites.save(&path).unwrap();
+
+        let (loaded, warning) = Favorites::load(&path).unwrap();
+        assert!(warning.is_none());
+        assert!(loaded.contains(&track("local")));
+        assert!(loaded.contains(&track("externa")));
+        assert!(loaded.contains(&track("local-2")));
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn corrupt_file_is_backed_up_and_loads_empty() {
         let path = temp_path("corrupt.json");
         fs::write(&path, "{ esto no es json válido").unwrap();
-        let (loaded, warning) = Favorites::load(&path);
+        let (loaded, warning) = Favorites::load(&path).unwrap();
         assert!(loaded.tracks.is_empty());
         assert!(warning.is_some());
         assert!(!path.exists());
@@ -182,7 +255,7 @@ mod tests {
     fn incompatible_version_is_backed_up() {
         let path = temp_path("version.json");
         fs::write(&path, r#"{"version": 99, "tracks": []}"#).unwrap();
-        let (loaded, warning) = Favorites::load(&path);
+        let (loaded, warning) = Favorites::load(&path).unwrap();
         assert!(loaded.tracks.is_empty());
         assert!(warning.is_some());
         let _ = fs::remove_file(path.with_extension("json.bak"));

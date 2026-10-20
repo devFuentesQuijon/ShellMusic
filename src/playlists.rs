@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +20,27 @@ struct PlaylistsFile {
     playlists: Vec<Playlist>,
 }
 
+/// mtime + tamaño para detectar escrituras externas entre carga y guardado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fingerprint {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+impl Fingerprint {
+    fn capture(path: &Path) -> Option<Self> {
+        let metadata = fs::metadata(path).ok()?;
+        Some(Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        })
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Playlists {
     pub items: Vec<Playlist>,
+    fingerprint: Option<Fingerprint>,
 }
 
 impl Playlists {
@@ -31,14 +50,21 @@ impl Playlists {
 
     /// Carga playlists; ante archivo corrupto o de versión incompatible lo
     /// aparta a `.bak` y empieza vacío, devolviendo un aviso para la UI.
-    pub fn load(path: &Path) -> (Self, Option<String>) {
-        let Ok(text) = fs::read_to_string(path) else {
-            return (Self::default(), None); // no existe aún
+    /// Un error de lectura distinto de "no existe" se propaga: continuar con
+    /// estado vacío dejaría que un guardado posterior borrara el archivo.
+    pub fn load(path: &Path) -> std::io::Result<(Self, Option<String>)> {
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok((Self::default(), None));
+            }
+            Err(err) => return Err(err),
         };
-        match serde_json::from_str::<PlaylistsFile>(&text) {
+        let (mut playlists, warning) = match serde_json::from_str::<PlaylistsFile>(&text) {
             Ok(file) if file.version == VERSION => (
                 Self {
                     items: file.playlists,
+                    fingerprint: None,
                 },
                 None,
             ),
@@ -53,13 +79,29 @@ impl Playlists {
                     )),
                 )
             }
-        }
+        };
+        playlists.fingerprint = Fingerprint::capture(path);
+        Ok((playlists, warning))
     }
 
-    /// Escritura atómica: archivo temporal + rename.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    /// Escritura atómica: archivo temporal + rename. Si el archivo cambió en
+    /// disco desde la última huella conocida (otra instancia), se fusiona por
+    /// nombre: las playlists externas nuevas se conservan y el contenido en
+    /// memoria tiene precedencia sobre las de igual nombre.
+    pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
+        }
+        if Fingerprint::capture(path) != self.fingerprint
+            && let Ok(text) = fs::read_to_string(path)
+            && let Ok(file) = serde_json::from_str::<PlaylistsFile>(&text)
+            && file.version == VERSION
+        {
+            for playlist in file.playlists {
+                if !self.items.iter().any(|p| p.name == playlist.name) {
+                    self.items.push(playlist);
+                }
+            }
         }
         let file = PlaylistsFile {
             version: VERSION,
@@ -68,6 +110,7 @@ impl Playlists {
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
         fs::rename(&tmp, path)?;
+        self.fingerprint = Fingerprint::capture(path);
         Ok(())
     }
 
@@ -214,7 +257,7 @@ mod tests {
         playlists.add_track(pl, track("b"));
         playlists.save(&path).unwrap();
 
-        let (loaded, warning) = Playlists::load(&path);
+        let (loaded, warning) = Playlists::load(&path).unwrap();
         assert!(warning.is_none());
         assert_eq!(loaded.items.len(), 1);
         assert_eq!(loaded.items[0].name, "mix");
@@ -223,10 +266,50 @@ mod tests {
     }
 
     #[test]
+    fn read_error_propagates() {
+        // Un directorio en el lugar del archivo produce un error de lectura
+        // distinto de NotFound: debe propagarse, no cargar vacío.
+        let path = temp_path("es-directorio.json");
+        fs::create_dir_all(&path).unwrap();
+        assert!(Playlists::load(&path).is_err());
+        let _ = fs::remove_dir(&path);
+    }
+
+    #[test]
+    fn save_merges_external_playlists() {
+        let path = temp_path("merge.json");
+        let mut playlists = Playlists::default();
+        let local = playlists.create("local").unwrap();
+        playlists.add_track(local, track("mía"));
+        playlists.save(&path).unwrap();
+
+        // Otra instancia añade una playlist y toca la existente por detrás.
+        let (mut other, _) = Playlists::load(&path).unwrap();
+        other.create("externa").unwrap();
+        other.add_track(0, track("ajena"));
+        other.save(&path).unwrap();
+
+        // Esta instancia guarda sin saberlo: conserva la playlist externa y
+        // su propio contenido manda en la de nombre compartido.
+        let pl = playlists.create("local-2").unwrap();
+        playlists.add_track(pl, track("nueva"));
+        playlists.save(&path).unwrap();
+
+        let (loaded, warning) = Playlists::load(&path).unwrap();
+        assert!(warning.is_none());
+        let names: Vec<&str> = loaded.items.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["local", "local-2", "externa"]);
+        let local = loaded.items.iter().find(|p| p.name == "local").unwrap();
+        assert_eq!(local.tracks.len(), 1);
+        assert_eq!(local.tracks[0].id, "mía");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
     fn corrupt_file_is_backed_up_and_loads_empty() {
         let path = temp_path("corrupt.json");
         fs::write(&path, "no json").unwrap();
-        let (loaded, warning) = Playlists::load(&path);
+        let (loaded, warning) = Playlists::load(&path).unwrap();
         assert!(loaded.items.is_empty());
         assert!(warning.is_some());
         assert!(path.with_extension("json.bak").exists());
@@ -237,7 +320,7 @@ mod tests {
     fn incompatible_version_is_backed_up() {
         let path = temp_path("version.json");
         fs::write(&path, r#"{"version": 42, "playlists": []}"#).unwrap();
-        let (loaded, warning) = Playlists::load(&path);
+        let (loaded, warning) = Playlists::load(&path).unwrap();
         assert!(loaded.items.is_empty());
         assert!(warning.is_some());
         let _ = fs::remove_file(path.with_extension("json.bak"));

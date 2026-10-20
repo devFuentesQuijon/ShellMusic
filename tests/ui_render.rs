@@ -23,6 +23,7 @@ fn test_app() -> App {
         &Config::default(),
         &std::env::temp_dir().join("shellmusic-ui-test-datos"),
     )
+    .unwrap()
 }
 
 fn render(app: &mut App) -> String {

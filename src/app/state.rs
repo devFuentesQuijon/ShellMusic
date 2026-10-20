@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use anyhow::Context;
 use ratatui::widgets::ListState;
 
 use crate::config::Config;
@@ -105,24 +106,27 @@ pub struct App {
     pub active_provider: usize,
     pub radio: bool,
     pub played: HashSet<(ProviderKind, String)>,
+    pub radio_epoch: u64,
     pub(super) results_limit: usize,
     favorites_path: std::path::PathBuf,
     playlists_path: std::path::PathBuf,
 }
 
 impl App {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config) -> anyhow::Result<Self> {
         let data_dir = dirs::data_dir()
             .unwrap_or_default()
             .join("shellmusic");
         Self::with_data_dir(config, &data_dir)
     }
 
-    pub fn with_data_dir(config: &Config, data_dir: &std::path::Path) -> Self {
+    pub fn with_data_dir(config: &Config, data_dir: &std::path::Path) -> anyhow::Result<Self> {
         let favorites_path = data_dir.join("favorites.json");
         let playlists_path = data_dir.join("playlists.json");
-        let (favorites, fav_warning) = Favorites::load(&favorites_path);
-        let (playlists, pl_warning) = Playlists::load(&playlists_path);
+        let (favorites, fav_warning) = Favorites::load(&favorites_path)
+            .with_context(|| format!("no se pudieron leer {}", favorites_path.display()))?;
+        let (playlists, pl_warning) = Playlists::load(&playlists_path)
+            .with_context(|| format!("no se pudieron leer {}", playlists_path.display()))?;
         let mut app = Self {
             focus: Focus::Searching,
             input: String::new(),
@@ -149,6 +153,7 @@ impl App {
             active_provider: 0,
             radio: config.radio.enabled,
             played: HashSet::new(),
+            radio_epoch: 0,
             results_limit: config.general.results_per_search,
             favorites_path,
             playlists_path,
@@ -156,7 +161,7 @@ impl App {
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
         }
-        app
+        Ok(app)
     }
 
     pub fn active_provider_kind(&self) -> ProviderKind {

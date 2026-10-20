@@ -196,6 +196,7 @@ fn playback_key(
         KeyCode::Char(' ') => spawn_player(player, tx, |p| async move { p.toggle_pause().await }),
         KeyCode::Char('s') => {
             app.queue.current = None;
+            app.radio_epoch += 1;
             app.message = Some(Message::info("detenido"));
             spawn_player(player, tx, |p| async move { p.stop().await });
         }

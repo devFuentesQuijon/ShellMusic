@@ -39,7 +39,12 @@ pub(super) fn handle_msg(
                 app.message = None;
             }
         }
-        AppMsg::RadioDone(artist, Ok(tracks)) => {
+        AppMsg::RadioDone(artist, Ok(tracks), epoch) => {
+            // Si el usuario detuvo o reprodujo otra cosa mientras buscábamos,
+            // la expansión quedó obsoleta y se descarta.
+            if epoch != app.radio_epoch {
+                return;
+            }
             let candidates = radio_candidates(&tracks, &app.queue, &app.played, RADIO_TRACKS);
             if candidates.is_empty() {
                 app.message = Some(Message::info(format!(
@@ -60,7 +65,10 @@ pub(super) fn handle_msg(
                 play_queue_track(app, player, tx, first);
             }
         }
-        AppMsg::RadioDone(artist, Err(err)) => {
+        AppMsg::RadioDone(artist, Err(err), epoch) => {
+            if epoch != app.radio_epoch {
+                return;
+            }
             app.message = Some(Message::error(format!(
                 "radio: búsqueda de «{artist}» fallida: {err}"
             )));
@@ -135,6 +143,8 @@ pub(super) fn play_queue_track(
         return;
     }
     app.queue.current = Some(index);
+    // Invalida cualquier expansión de radio en vuelo: hay reproducción nueva.
+    app.radio_epoch += 1;
     app.played.insert((
         app.queue.tracks[index].provider,
         app.queue.tracks[index].id.clone(),
@@ -199,11 +209,12 @@ fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
         return;
     };
     app.message = Some(Message::info(format!("radio: buscando pistas de «{artist}»…")));
+    let epoch = app.radio_epoch;
     let tx = tx.clone();
     let limit = app.results_limit;
     tokio::spawn(async move {
         let result = provider.search(&artist, limit).await.map_err(|e| e.to_string());
-        let _ = tx.send(AppMsg::RadioDone(artist, result));
+        let _ = tx.send(AppMsg::RadioDone(artist, result, epoch));
     });
 }
 
@@ -238,6 +249,7 @@ pub(super) fn remove_from_queue(
         }
         Some(Removed::CurrentWithoutSuccessor) => {
             app.message = Some(Message::info("eliminada la pista que sonaba; detenido"));
+            app.radio_epoch += 1;
             spawn_player(player, tx, |p| async move { p.stop().await });
         }
         Some(Removed::Other) => {
@@ -327,5 +339,62 @@ mod tests {
         let candidates = radio_candidates(&results, &queue, &played, 5);
         let ids: Vec<&str> = candidates.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["0", "1", "2", "3", "4"]);
+    }
+
+    struct MockPlayer;
+
+    #[async_trait::async_trait]
+    impl Player for MockPlayer {
+        async fn play(&self, _url: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn toggle_pause(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn stop(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn set_volume(&self, _volume: u8) -> Result<()> {
+            Ok(())
+        }
+        async fn status(&self) -> Result<crate::player::PlaybackStatus> {
+            Ok(crate::player::PlaybackStatus::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn radio_done_with_stale_epoch_is_ignored() {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-radio-test-{}", std::process::id())),
+        )
+        .unwrap();
+        app.radio = true;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let results = vec![track("x"), track("y")];
+
+        // El usuario pulsó stop (o reprodujo otra cosa) tras disparar la búsqueda.
+        let epoch = app.radio_epoch;
+        app.radio_epoch += 1;
+        handle_msg(
+            &mut app,
+            AppMsg::RadioDone("artista".to_string(), Ok(results.clone()), epoch),
+            &player,
+            &tx,
+        );
+        assert!(app.queue.is_empty());
+        assert_eq!(app.queue.current, None);
+
+        // Con el epoch vigente sí expande y reproduce la primera.
+        let epoch = app.radio_epoch;
+        handle_msg(
+            &mut app,
+            AppMsg::RadioDone("artista".to_string(), Ok(results), epoch),
+            &player,
+            &tx,
+        );
+        assert_eq!(app.queue.len(), 2);
+        assert_eq!(app.queue.current, Some(0));
     }
 }
