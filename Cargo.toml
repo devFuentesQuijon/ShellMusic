@@ -1,6 +1,6 @@
 [package]
 name = "shellmusic"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud (mpv + yt-dlp)"
 license = "MIT"
