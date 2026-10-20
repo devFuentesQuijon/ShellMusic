@@ -307,9 +307,9 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **2** | Cola de reproducción gestionable (añadir, quitar, reordenar, autoplay) — **completada** |
 | **3** | Favoritos locales — **completada** |
 | **4** | Playlists locales — **completada** |
-| 5 | Provider Spotify (API oficial + OAuth; requiere Premium) |
+| 5 | Provider Spotify — **pospuesta**: desde feb-2026 las apps nuevas en Development Mode exigen que cada usuario cree su propia app de desarrollador y tenga Premium activo ([guía de migración](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide)); fricción excesiva para el usuario objetivo |
 | **6** | Provider SoundCloud (búsqueda vía yt-dlp `scsearch`) + selector de proveedor en la TUI (tecla `m`, `[general] providers` / `default_provider`) — **completada** |
-| 7 | Provider Apple Music (MusicKit; requiere cuenta de desarrollador) |
+| 7 | Provider Apple Music — **pospuesta**: misma razón que la fase 5, agravada por la cuenta de desarrollador de pago |
 | 8 | Extras: caché de búsquedas, modo radio, publicación en gestores de paquetes |
 
 ---
