@@ -215,18 +215,28 @@ impl Playlists {
 
 /// Merge a 3 bandas de pistas dentro de una playlist: lo eliminado de base
 /// por cualquiera de los dos lados queda eliminado; lo añadido por cualquiera
-/// de los dos lados se conserva.
+/// de los dos lados se conserva. El orden del disco gana para las pistas
+/// compartidas (es el estado más reciente) y las adiciones locales se anexan
+/// en su orden de memoria.
 fn merge_tracks(base: &[Track], mem: &mut Vec<Track>, disk: &[Track]) {
     let base_keys: HashSet<_> = base.iter().map(track_key).collect();
-    let disk_keys: HashSet<_> = disk.iter().map(track_key).collect();
     let mem_keys: HashSet<_> = mem.iter().map(track_key).collect();
-    mem.retain(|t| !base_keys.contains(&track_key(t)) || disk_keys.contains(&track_key(t)));
+    let mut result = Vec::with_capacity(mem.len() + disk.len());
     for track in disk {
         let key = track_key(track);
-        if !mem_keys.contains(&key) && !base_keys.contains(&key) {
-            mem.push(track.clone());
+        // Sobrevive si sigue en memoria o si es una adición externa.
+        if mem_keys.contains(&key) || !base_keys.contains(&key) {
+            result.push(track.clone());
         }
     }
+    for track in mem.iter() {
+        let key = track_key(track);
+        // Adición local (ni en base ni en disco): se anexa al final.
+        if !base_keys.contains(&key) && !disk.iter().any(|t| track_key(t) == key) {
+            result.push(track.clone());
+        }
+    }
+    *mem = result;
 }
 
 #[cfg(test)]
@@ -385,6 +395,32 @@ mod tests {
         let mix = loaded.items.iter().find(|p| p.name == "mix").unwrap();
         let ids: Vec<&str> = mix.tracks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["y", "z"], "el borrado externo de pista se respeta y la adición local se conserva");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_preserves_external_track_reorder() {
+        let path = temp_path("merge-reorder.json");
+        let mut playlists = Playlists::default();
+        let mix = playlists.create("mix").unwrap();
+        playlists.add_track(mix, track("a"));
+        playlists.add_track(mix, track("b"));
+        playlists.add_track(mix, track("c"));
+        playlists.save(&path).unwrap();
+
+        // Otra instancia reordena [a, b, c] -> [b, a, c].
+        let (mut other, _) = Playlists::load(&path).unwrap();
+        other.move_track_up(0, 1);
+        other.save(&path).unwrap();
+
+        // Esta instancia añade "d" desde su snapshot viejo y guarda.
+        playlists.add_track(0, track("d"));
+        playlists.save(&path).unwrap();
+
+        let (loaded, _) = Playlists::load(&path).unwrap();
+        let mix = loaded.items.iter().find(|p| p.name == "mix").unwrap();
+        let ids: Vec<&str> = mix.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["b", "a", "c", "d"], "el orden del disco se conserva y la adición local se anexa");
         let _ = fs::remove_file(&path);
     }
 
