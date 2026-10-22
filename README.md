@@ -1,12 +1,32 @@
-# ShellMusic
+```
+ ___ _        _ _ __  __         _
+/ __| |_  ___| | |  \/  |_  _ __(_)__
+\__ \ ' \/ -_) | | |\/| | || (_-< / _|
+|___/_||_\___|_|_|_|  |_|\_,_/__/_\__|
+```
+
+**Toda tu música, sin salir de la terminal.**
 
 [![CI](https://github.com/devFuentesQuijon/ShellMusic/actions/workflows/ci.yml/badge.svg)](https://github.com/devFuentesQuijon/ShellMusic/actions/workflows/ci.yml)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 
-TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud desde la terminal. Escrita en Rust con ratatui; la reproducción corre a cargo de **mpv** (controlado por JSON IPC) y la búsqueda/resolución de **yt-dlp**.
+TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud. Escrita en Rust con ratatui; la reproducción corre a cargo de **mpv** (controlado por JSON IPC) y la búsqueda/resolución de **yt-dlp**.
 
 ![Demo de ShellMusic](docs/demo.gif)
 
-![ShellMusic](docs/screenshot.png)
+## Características
+
+- **Busca y reproduce** YouTube Music y SoundCloud sin abrir el navegador (`m` cambia de proveedor en caliente).
+- **Cola gestionable**: añade, quita, reordena (`J`/`K`), baraja (`S`) y recorre listas largas por página (`PgUp`/`PgDn`) o al salto (`g`/`G`).
+- **Modo radio** con cinco sub-modos (artista, similares, random, random género, rarezas): la siguiente tanda se busca mientras suena la última pista y entra sin pausa.
+- **Repetición** off / toda la cola / pista actual (`l`) y **seek** de ±5 s o ±30 s (`←`/`→`).
+- **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube.
+- **Historial de búsquedas** navegable con `↑`/`↓`, como en un shell.
+- **Ayuda contextual** de atajos con `?`.
+- **Caché en memoria** de búsquedas y mitigación del bloqueo anti-bot de YouTube (cookies del navegador solo cuando hacen falta; nunca salen de tu equipo).
+- Binario único para Linux, macOS y Windows.
+
+![ShellMusic reproduciendo](docs/screenshot.png)
 
 ## Instalación
 

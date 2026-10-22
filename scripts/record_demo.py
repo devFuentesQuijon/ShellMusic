@@ -210,7 +210,7 @@ def _run_demo():
     hold(stream, screen, renderer, frames, 1.0)
 
     # 2. Type search query
-    type_text(child, stream, screen, renderer, frames, "daft punk", char_delay=0.15)
+    type_text(child, stream, screen, renderer, frames, "something about us", char_delay=0.15)
     hold(stream, screen, renderer, frames, 0.5)
 
     # 3. Press Enter to search
@@ -235,6 +235,13 @@ def _run_demo():
     send_keys(child, stream, screen, renderer, frames, "f", settle=0.8)
     hold(stream, screen, renderer, frames, 0.5)
 
+    # 6.5. Play the first result (g + Enter) — la resolución del stream
+    # tarda unos segundos; la barra muestra el progreso real.
+    send_keys(child, stream, screen, renderer, frames, "g", settle=0.3)
+    send_keys(child, stream, screen, renderer, frames, "\r", settle=1.5)
+    feed_and_capture(child, stream, screen, renderer, frames, 8.0)
+    hold(stream, screen, renderer, frames, 1.5)
+
     # 7. Switch provider to SoundCloud (m)
     send_keys(child, stream, screen, renderer, frames, "m", settle=0.5)
     hold(stream, screen, renderer, frames, 1.2)
@@ -249,6 +256,12 @@ def _run_demo():
     send_keys(child, stream, screen, renderer, frames, "a", settle=0.8)
     hold(stream, screen, renderer, frames, 0.5)
 
+    # 9.5. Page navigation in results (PgDn / PgUp)
+    send_keys(child, stream, screen, renderer, frames, "\x1b[6~", settle=0.5)
+    hold(stream, screen, renderer, frames, 0.6)
+    send_keys(child, stream, screen, renderer, frames, "\x1b[5~", settle=0.5)
+    hold(stream, screen, renderer, frames, 0.6)
+
     # 10. Toggle radio mode (r)
     send_keys(child, stream, screen, renderer, frames, "r", settle=0.5)
     hold(stream, screen, renderer, frames, 1.2)
@@ -261,20 +274,36 @@ def _run_demo():
     send_keys(child, stream, screen, renderer, frames, "\t", settle=0.5)
     hold(stream, screen, renderer, frames, 1.5)
 
-    # 13. Switch back to results (Tab)
-    send_keys(child, stream, screen, renderer, frames, "\t", settle=0.5)
+    # 13. Volver a resultados (Esc desde Favoritos va a Resultados)
+    send_keys(child, stream, screen, renderer, frames, "\x1b", settle=0.5)
     hold(stream, screen, renderer, frames, 0.5)
 
-    # 14. Try to play (Enter) — shows player bar even if mpv fails
-    send_keys(child, stream, screen, renderer, frames, "\r", settle=1.5)
-    feed_and_capture(child, stream, screen, renderer, frames, 3.0)
-    hold(stream, screen, renderer, frames, 2.0)
+    # 14. (La reproducción ya arrancó en el paso 6.5.)
+
+    # 14.5. Cycle repeat mode (l) — the bar shows rep:all
+    send_keys(child, stream, screen, renderer, frames, "l", settle=0.5)
+    hold(stream, screen, renderer, frames, 0.8)
+
+    # 14.6. Shuffle the queue (S)
+    send_keys(child, stream, screen, renderer, frames, "S", settle=0.5)
+    hold(stream, screen, renderer, frames, 0.8)
+
+    # Screenshot: reproduciendo, cola llena, favorito marcado, radio y
+    # repetición visibles en la barra.
+    frames[-1].save("docs/screenshot.png")
+    print("  Screenshot guardado: docs/screenshot.png")
 
     # 15. Volume up a couple times
     send_keys(child, stream, screen, renderer, frames, "+", settle=0.3)
     send_keys(child, stream, screen, renderer, frames, "+", settle=0.3)
     send_keys(child, stream, screen, renderer, frames, "+", settle=0.3)
     hold(stream, screen, renderer, frames, 0.8)
+
+    # 15.5. Open the help overlay (?)
+    send_keys(child, stream, screen, renderer, frames, "?", settle=0.5)
+    hold(stream, screen, renderer, frames, 2.0)
+    send_keys(child, stream, screen, renderer, frames, "\x1b", settle=0.5)
+    hold(stream, screen, renderer, frames, 0.5)
 
     # 16. Open playlists overlay
     send_keys(child, stream, screen, renderer, frames, "P", settle=0.8)
