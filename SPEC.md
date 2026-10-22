@@ -329,6 +329,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |
 | 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") |
 | 14 | Pulido: cola persistente entre sesiones (restaurar cola + pista + posición al arrancar); temas de color configurables en `config.toml` |
+| **15** | Limpieza de la cola: con el modo radio la cola crece sin límite (~5 pistas por tanda). Al superar 500 pistas (`MAX_QUEUE` en `src/queue.rs`) se podan las ya reproducidas antes de encolar más, conservando las 20 anteriores a la actual (`KEEP_BEFORE_CURRENT`) para la navegación `p`; sin reproducción en curso o con la actual cerca del inicio no se poda — **completada** |
 
 ---
 

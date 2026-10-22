@@ -1,5 +1,10 @@
 use crate::providers::Track;
 
+/// Tope de la cola: al superarlo, la app poda las pistas ya reproducidas.
+pub const MAX_QUEUE: usize = 500;
+/// Pistas recientes antes de la actual que se conservan para `p` (anterior).
+pub const KEEP_BEFORE_CURRENT: usize = 20;
+
 #[derive(Debug, Default)]
 pub struct Queue {
     pub tracks: Vec<Track>,
@@ -131,6 +136,30 @@ impl Queue {
             _ => None,
         }
     }
+
+    /// Poda las pistas anteriores a la actual cuando la cola supera
+    /// MAX_QUEUE, conservando las KEEP_BEFORE_CURRENT más recientes para la
+    /// navegación "anterior". Devuelve cuántas se eliminaron.
+    ///
+    /// Llamarla ANTES de añadir una tanda de pistas: los índices capturados
+    /// durante la tanda se mantienen válidos porque dentro de ella no hay
+    /// más podas.
+    pub fn prune_played(&mut self) -> usize {
+        if self.tracks.len() <= MAX_QUEUE {
+            return 0;
+        }
+        // Sin reproducción en curso no se sabe qué está pendiente: no podar.
+        let Some(current) = self.current else {
+            return 0;
+        };
+        let drop = current.saturating_sub(KEEP_BEFORE_CURRENT);
+        if drop == 0 {
+            return 0;
+        }
+        self.tracks.drain(0..drop);
+        self.current = Some(current - drop);
+        drop
+    }
 }
 
 #[cfg(test)]
@@ -256,5 +285,55 @@ mod tests {
         let mut ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
         ids.sort();
         assert_eq!(ids, ["a", "b", "c"]);
+    }
+
+    fn big_queue(n: usize, current: Option<usize>) -> Queue {
+        let mut queue = Queue::new();
+        for i in 0..n {
+            queue.add(track(&format!("t{i}")));
+        }
+        queue.current = current;
+        queue
+    }
+
+    #[test]
+    fn prune_noop_below_cap() {
+        let mut queue = big_queue(3, Some(1));
+        assert_eq!(queue.prune_played(), 0);
+        assert_eq!(queue.len(), 3);
+        assert_eq!(queue.current, Some(1));
+    }
+
+    #[test]
+    fn prune_drops_old_keeps_margin_and_adjusts_current() {
+        let mut queue = big_queue(MAX_QUEUE + 10, Some(MAX_QUEUE + 5));
+        let dropped = queue.prune_played();
+        assert_eq!(dropped, MAX_QUEUE + 5 - KEEP_BEFORE_CURRENT);
+        // Quedan el margen anterior más la actual y su cola pendiente.
+        assert_eq!(queue.len(), KEEP_BEFORE_CURRENT + 5);
+        assert_eq!(queue.current, Some(KEEP_BEFORE_CURRENT));
+        // La actual sigue siendo la misma pista y hay margen para `p`.
+        assert_eq!(
+            queue.current_track().unwrap().id,
+            format!("t{}", MAX_QUEUE + 5)
+        );
+        assert_eq!(queue.prev_index(), Some(KEEP_BEFORE_CURRENT - 1));
+    }
+
+    #[test]
+    fn prune_without_current_does_nothing() {
+        let mut queue = big_queue(MAX_QUEUE + 10, None);
+        assert_eq!(queue.prune_played(), 0);
+        assert_eq!(queue.len(), MAX_QUEUE + 10);
+    }
+
+    #[test]
+    fn prune_with_early_current_and_big_tail_does_nothing() {
+        // Todo lo que sobra está por delante (pendiente): no se poda lo no
+        // reproducido aunque la cola supere el tope.
+        let mut queue = big_queue(MAX_QUEUE + 10, Some(5));
+        assert_eq!(queue.prune_played(), 0);
+        assert_eq!(queue.len(), MAX_QUEUE + 10);
+        assert_eq!(queue.current, Some(5));
     }
 }

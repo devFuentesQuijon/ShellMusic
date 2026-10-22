@@ -64,6 +64,9 @@ pub(super) fn handle_msg(
                 return;
             }
             let count = candidates.len();
+            // Poda antes de encolar la tanda: los índices capturados en el
+            // bucle se mantienen válidos.
+            app.queue.prune_played();
             let mut first = None;
             for track in candidates {
                 let index = app.queue.add(track);
@@ -94,6 +97,7 @@ pub(super) fn handle_msg(
 }
 
 pub(super) fn add_to_queue(app: &mut App, track: Track) {
+    app.queue.prune_played();
     app.queue.add(track.clone());
     app.message = Some(Message::info(format!("añadida a la cola: {}", track.title)));
     if app.queue_selected().is_none() {
@@ -149,6 +153,7 @@ pub(super) fn play_result(
         return;
     }
     let track = app.results[result_index].clone();
+    app.queue.prune_played();
     let index = app.queue.add(track);
     play_queue_track(app, player, tx, index);
 }
@@ -903,5 +908,34 @@ mod tests {
             app.radio_expanded_for, None,
             "hay siguiente en cola: sin prefetch"
         );
+    }
+
+    #[tokio::test]
+    async fn radio_done_poda_cola_antes_de_encolar() {
+        let mut app = app_with_provider("radiodone-poda");
+        app.radio = true;
+        app.playback_active = true;
+        for i in 0..crate::queue::MAX_QUEUE + 10 {
+            app.queue.add(track(&format!("t{i}")));
+        }
+        app.queue.current = Some(crate::queue::MAX_QUEUE + 5);
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let epoch = app.radio_epoch;
+        handle_msg(
+            &mut app,
+            AppMsg::RadioDone("artista".to_string(), Ok(vec![track("x"), track("y")]), epoch),
+            &player,
+            &tx,
+        );
+        // Podadas las antiguas (margen de KEEP_BEFORE_CURRENT) + 2 nuevas.
+        assert_eq!(
+            app.queue.len(),
+            crate::queue::KEEP_BEFORE_CURRENT + 5 + 2
+        );
+        let current = app.queue.current.unwrap();
+        assert_eq!(app.queue.tracks[current].id, format!("t{}", crate::queue::MAX_QUEUE + 5));
+        assert_eq!(app.queue.next_index(), Some(current + 1));
     }
 }

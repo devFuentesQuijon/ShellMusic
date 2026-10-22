@@ -149,6 +149,7 @@ pub(super) fn handle_key(
             KeyCode::Enter => {
                 if let Some(index) = app.favorites_selected() {
                     let track = app.favorites.tracks[index].clone();
+                    app.queue.prune_played();
                     let queue_index = app.queue.add(track);
                     play_queue_track(app, player, tx, queue_index);
                 }
@@ -349,6 +350,7 @@ fn overlay_content_key(
                 && let Some(track) = app.playlists.items.get(playlist).and_then(|p| p.tracks.get(index)).cloned()
             {
                 // El overlay permanece abierto para seguir gestionando la playlist.
+                app.queue.prune_played();
                 let queue_index = app.queue.add(track);
                 play_queue_track(app, player, tx, queue_index);
             }
@@ -366,6 +368,7 @@ fn overlay_content_key(
                 && !tracks.is_empty()
             {
                 let name = app.playlists.items[playlist].name.clone();
+                app.queue.prune_played();
                 let mut first = None;
                 for track in tracks {
                     let index = app.queue.add(track);
