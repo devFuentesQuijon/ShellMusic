@@ -75,7 +75,9 @@ fn parse_entry(line: &str, provider: ProviderKind) -> Option<Track> {
     let duration = v
         .get("duration")
         .and_then(Value::as_f64)
-        .map(Duration::from_secs_f64);
+        // Una duración negativa sería dato inválido; se clama a 0 porque
+        // from_secs_f64 panicua con negativos.
+        .map(|s| Duration::from_secs_f64(s.max(0.0)));
     let source_url = ["webpage_url", "url"]
         .iter()
         .find_map(|key| v.get(key).and_then(Value::as_str))
@@ -112,5 +114,12 @@ mod tests {
             "https://soundcloud.com/daftpunk/one-more-time"
         );
         assert_eq!(track.duration, Some(Duration::from_secs_f64(320.5)));
+    }
+
+    #[test]
+    fn parse_entry_with_negative_duration_clamps_to_zero() {
+        let line = r#"{"id":"abc","title":"X","uploader":"Y","duration":-3.5,"webpage_url":"https://www.youtube.com/watch?v=abc"}"#;
+        let track = parse_entry(line, ProviderKind::Youtube).expect("entrada válida");
+        assert_eq!(track.duration, Some(Duration::ZERO));
     }
 }

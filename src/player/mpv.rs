@@ -388,8 +388,8 @@ impl Player for MpvPlayer {
     async fn status(&self) -> Result<PlaybackStatus> {
         let shared = lock(&self.shared);
         Ok(PlaybackStatus {
-            position: shared.position.map(Duration::from_secs_f64),
-            duration: shared.duration.map(Duration::from_secs_f64),
+            position: shared.position.map(secs_to_duration),
+            duration: shared.duration.map(secs_to_duration),
             paused: shared.paused,
             volume: shared.volume.clamp(0, 100) as u8,
         })
@@ -413,6 +413,12 @@ impl Drop for MpvPlayer {
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// mpv puede reportar time-pos negativo (buffering inicial, seek antes del
+/// inicio); from_secs_f64 panicua con negativos, así que se clama a 0.
+fn secs_to_duration(seconds: f64) -> Duration {
+    Duration::from_secs_f64(seconds.max(0.0))
 }
 
 fn ytdl_raw_options(youtube: &Youtube, attempt: &CookieAttempt) -> Option<String> {
@@ -622,6 +628,13 @@ mod tests {
         let first = ipc_server_path();
         let second = ipc_server_path();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn secs_to_duration_clamps_negatives() {
+        assert_eq!(secs_to_duration(-2.5), Duration::ZERO);
+        assert_eq!(secs_to_duration(0.0), Duration::ZERO);
+        assert_eq!(secs_to_duration(1.5), Duration::from_secs_f64(1.5));
     }
 
     #[cfg(unix)]
