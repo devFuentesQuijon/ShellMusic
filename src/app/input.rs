@@ -90,6 +90,18 @@ pub(super) fn handle_key(
                     app.select(index + 1);
                 }
             }
+            KeyCode::PageUp => {
+                if let Some(index) = app.selected() {
+                    app.select(index.saturating_sub(app.list_page_size));
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(index) = app.selected() {
+                    app.select(index.saturating_add(app.list_page_size));
+                }
+            }
+            KeyCode::Char('g') => app.select(0),
+            KeyCode::Char('G') => app.select(usize::MAX),
             _ => playback_key(app, key, player, tx),
         },
         Focus::Queue => match key.code {
@@ -140,6 +152,18 @@ pub(super) fn handle_key(
                     app.queue_select(index + 1);
                 }
             }
+            KeyCode::PageUp => {
+                if let Some(index) = app.queue_selected() {
+                    app.queue_select(index.saturating_sub(app.list_page_size));
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(index) = app.queue_selected() {
+                    app.queue_select(index.saturating_add(app.list_page_size));
+                }
+            }
+            KeyCode::Char('g') => app.queue_select(0),
+            KeyCode::Char('G') => app.queue_select(usize::MAX),
             _ => playback_key(app, key, player, tx),
         },
         Focus::Favorites => match key.code {
@@ -190,6 +214,18 @@ pub(super) fn handle_key(
                     app.favorites_select(index + 1);
                 }
             }
+            KeyCode::PageUp => {
+                if let Some(index) = app.favorites_selected() {
+                    app.favorites_select(index.saturating_sub(app.list_page_size));
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(index) = app.favorites_selected() {
+                    app.favorites_select(index.saturating_add(app.list_page_size));
+                }
+            }
+            KeyCode::Char('g') => app.favorites_select(0),
+            KeyCode::Char('G') => app.favorites_select(usize::MAX),
             _ => playback_key(app, key, player, tx),
         },
     }
@@ -331,6 +367,18 @@ fn overlay_list_key(app: &mut App, key: KeyEvent) {
                 app.overlay_list_select(index + 1);
             }
         }
+        KeyCode::PageUp => {
+            if let Some(index) = app.overlay_list_state.selected() {
+                app.overlay_list_select(index.saturating_sub(app.overlay_page_size));
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(index) = app.overlay_list_state.selected() {
+                app.overlay_list_select(index.saturating_add(app.overlay_page_size));
+            }
+        }
+        KeyCode::Char('g') => app.overlay_list_select(0),
+        KeyCode::Char('G') => app.overlay_list_select(usize::MAX),
         _ => {}
     }
 }
@@ -420,6 +468,24 @@ fn overlay_content_key(
                 app.overlay_content_select(playlist, index + 1);
             }
         }
+        KeyCode::PageUp => {
+            if let Some(index) = selected {
+                app.overlay_content_select(
+                    playlist,
+                    index.saturating_sub(app.overlay_page_size),
+                );
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(index) = selected {
+                app.overlay_content_select(
+                    playlist,
+                    index.saturating_add(app.overlay_page_size),
+                );
+            }
+        }
+        KeyCode::Char('g') => app.overlay_content_select(playlist, 0),
+        KeyCode::Char('G') => app.overlay_content_select(playlist, usize::MAX),
         _ => {}
     }
 }
@@ -501,6 +567,21 @@ fn overlay_pick_key(app: &mut App, key: KeyEvent, track: Track) {
                     .select(Some((index + 1).min(count))); // count = índice de "nueva playlist…"
             }
         }
+        KeyCode::PageUp => {
+            if let Some(index) = app.overlay_list_state.selected() {
+                app.overlay_list_state
+                    .select(Some(index.saturating_sub(app.overlay_page_size)));
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(index) = app.overlay_list_state.selected() {
+                app.overlay_list_state.select(Some(
+                    index.saturating_add(app.overlay_page_size).min(count),
+                ));
+            }
+        }
+        KeyCode::Char('g') => app.overlay_list_state.select(Some(0)),
+        KeyCode::Char('G') => app.overlay_list_state.select(Some(count)),
         _ => {}
     }
 }

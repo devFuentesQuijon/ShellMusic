@@ -96,6 +96,7 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-25 | `S` baraja la cola en el sitio manteniendo la pista en reproducción en su posición. | Media |
 | RF-26 | `?` abre un overlay modal de ayuda con los atajos por contexto (se cierra con Esc, `?` o Enter); el pie de cada panel apunta a `? ayuda`. | Media |
 | RF-27 | Prefetch de radio: al empezar a sonar la última pista de la cola (radio activa, repetición off) se lanza la expansión en segundo plano y las pistas nuevas se encolan sin interrumpir; al terminar la pista la siguiente entra sin pausa. Si la búsqueda falla o no hay nada nuevo, se reintenta al agotarse la cola (comportamiento clásico). | Alta |
+| RF-28 | Navegación en listas largas: `PageUp`/`PageDown` saltan una página (la altura visible real del panel, fijada por el render) y `g`/`G` van al inicio/fin, en Resultados, Cola, Favoritos y las listas de los overlays de playlists. | Media |
 
 ### Flujo de usuario principal
 
@@ -242,6 +243,8 @@ pub trait Player: Send + Sync {
 | l | Resultados / Cola / Favoritos | Ciclar repetición: off → toda la cola → pista actual |
 | S | Resultados / Cola / Favoritos | Barajar la cola (la pista actual conserva su posición) |
 | ? | Resultados / Cola / Favoritos | Overlay modal de ayuda de atajos (Esc/? cierra) |
+| PgUp / PgDn | Listas (resultados, cola, favoritos, playlists) | Saltar una página |
+| g / G | Listas (resultados, cola, favoritos, playlists) | Ir al inicio / al final |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
@@ -324,7 +327,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **9** | Prioridades de reproducción y UX: seek dentro de la pista (`←`/`→`, `seek` en el trait `Player`), modos de repetición (off → all → one), shuffle de la cola, overlay de ayuda contextual con `?` — **completada** |
 | 9.1 | Bug (panic): `cannot convert float seconds to Duration: value is negative` (`core/src/time.rs`). mpv puede reportar `time-pos` negativo (buffering inicial o seek antes del inicio) y `Duration::from_secs_f64` panicua con negativos en `src/player/mpv.rs` (`status()`, helper `secs_to_duration`); también clamado en `src/providers/ytdlp.rs` (`parse_entry`, duración inválida). Viola RNF-4 (ningún error produce panic) — **completada** |
 | 9.2 | Prefetch de radio: la expansión se dispara al empezar a sonar la última pista de la cola (antes: al agotarse), encolando la tanda siguiente en segundo plano sin interrumpir; al terminar la pista la siguiente entra sin pausa. Guardas: `radio_expanded_for` (no duplicar búsquedas ni martillear yt-dlp tras fallos) y `playback_active` (RadioDone solo auto-reproduce con el reproductor parado) — **completada** |
-| 10 | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists |
+| **10** | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists — **completada** |
 | 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
 | 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |
 | 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") |

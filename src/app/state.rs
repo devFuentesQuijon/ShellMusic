@@ -194,6 +194,11 @@ pub struct App {
     pub overlay: Overlay,
     pub overlay_list_state: ListState,
     pub overlay_content_state: ListState,
+    /// Filas visibles de los paneles de listas (resultados/cola/favoritos):
+    /// la fija el render en cada frame; alimenta los saltos PgUp/PgDn.
+    pub list_page_size: usize,
+    /// Filas visibles de las listas del overlay de playlists.
+    pub overlay_page_size: usize,
     pub overlay_input: String,
     pub pending_delete: Option<usize>,
     pub status: PlaybackStatus,
@@ -259,6 +264,8 @@ impl App {
             overlay: Overlay::Closed,
             overlay_list_state: ListState::default(),
             overlay_content_state: ListState::default(),
+            list_page_size: 10,
+            overlay_page_size: 10,
             overlay_input: String::new(),
             pending_delete: None,
             status: PlaybackStatus {
@@ -498,6 +505,31 @@ mod tests {
         app.history_prev();
         app.history_next();
         assert_eq!(app.input, "texto");
+    }
+
+    #[test]
+    fn select_clampa_mas_alla_del_final() {
+        // Base de g/G y PgDn: select(0) va al inicio y select(usize::MAX)
+        // clama al final; con lista vacía no selecciona nada.
+        let mut app = app_with_history(&[]);
+        for i in 0..30 {
+            app.results.push(Track {
+                id: i.to_string(),
+                title: format!("t{i}"),
+                artist: "a".to_string(),
+                duration: None,
+                source_url: String::new(),
+                provider: ProviderKind::Youtube,
+            });
+        }
+        app.select(usize::MAX);
+        assert_eq!(app.selected(), Some(29));
+        app.select(0);
+        assert_eq!(app.selected(), Some(0));
+
+        let mut app = app_with_history(&[]);
+        app.queue_select(usize::MAX);
+        assert_eq!(app.queue_selected(), None);
     }
 
     #[test]

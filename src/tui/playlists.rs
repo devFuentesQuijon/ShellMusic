@@ -12,6 +12,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     }
     let area = centered(frame.area(), 60, 60);
+    // Filas útiles del overlay (menos el borde) para PgUp/PgDn.
+    app.overlay_page_size = area.height.saturating_sub(2).max(1) as usize;
     frame.render_widget(Clear, area);
     match app.overlay.clone() {
         Overlay::Closed | Overlay::Help => {}

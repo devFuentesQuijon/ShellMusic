@@ -47,6 +47,8 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "General",
         &[
             ("Tab / Shift+Tab", "ciclar paneles"),
+            ("PgUp / PgDn", "saltar una página en listas"),
+            ("g / G", "inicio / fin de la lista"),
             ("/", "foco a búsqueda"),
             ("m", "cambiar proveedor"),
             ("r / R", "radio on/off · sub-modo"),

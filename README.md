@@ -61,6 +61,8 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | l | Resultados / Cola / Favoritos | Ciclar repetición: off → toda la cola → pista actual |
 | S | Resultados / Cola / Favoritos | Barajar la cola (la pista que suena mantiene su lugar) |
 | ? | Resultados / Cola / Favoritos | Ayuda de atajos (overlay; se cierra con Esc o ?) |
+| PgUp / PgDn | Listas (resultados, cola, favoritos, playlists) | Saltar una página |
+| g / G | Listas (resultados, cola, favoritos, playlists) | Ir al inicio / al final |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |

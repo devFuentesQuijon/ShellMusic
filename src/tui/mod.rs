@@ -38,6 +38,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Percentage(30),
     ])
     .areas(middle_area);
+    // Filas útiles de los paneles (menos el borde) para PgUp/PgDn.
+    app.list_page_size = middle_area.height.saturating_sub(2).max(1) as usize;
     search::draw_input(frame, app, search_area);
     search::draw_results(frame, app, results_area);
     queue::draw(frame, app, queue_area);
