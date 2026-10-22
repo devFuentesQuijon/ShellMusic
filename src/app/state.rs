@@ -210,6 +210,12 @@ pub struct App {
     /// de la misma canción.
     pub played_titles: HashSet<String>,
     pub radio_epoch: u64,
+    /// Pista para la que ya se pidió expansión de radio: evita relanzar la
+    /// búsqueda en cada play y martillear yt-dlp tras un fallo.
+    pub radio_expanded_for: Option<(ProviderKind, String)>,
+    /// true mientras hay reproducción en curso; RadioDone solo auto-reproduce
+    /// si el reproductor está parado (cola agotada), no en prefetch.
+    pub playback_active: bool,
     pub(super) results_limit: usize,
     favorites_path: std::path::PathBuf,
     playlists_path: std::path::PathBuf,
@@ -270,6 +276,8 @@ impl App {
             played: HashSet::new(),
             played_titles: HashSet::new(),
             radio_epoch: 0,
+            radio_expanded_for: None,
+            playback_active: false,
             results_limit: config.general.results_per_search,
             favorites_path,
             playlists_path,

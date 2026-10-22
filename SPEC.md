@@ -95,6 +95,7 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-24 | `l` cicla el modo de repetición (off → toda la cola → pista actual), aplicado en el autoplay al terminar la pista de forma natural: `all` vuelve a la primera de la cola, `one` repite la pista; la barra del reproductor muestra `rep:all`/`rep:1`. La radio solo entra con repetición off. | Alta |
 | RF-25 | `S` baraja la cola en el sitio manteniendo la pista en reproducción en su posición. | Media |
 | RF-26 | `?` abre un overlay modal de ayuda con los atajos por contexto (se cierra con Esc, `?` o Enter); el pie de cada panel apunta a `? ayuda`. | Media |
+| RF-27 | Prefetch de radio: al empezar a sonar la última pista de la cola (radio activa, repetición off) se lanza la expansión en segundo plano y las pistas nuevas se encolan sin interrumpir; al terminar la pista la siguiente entra sin pausa. Si la búsqueda falla o no hay nada nuevo, se reintenta al agotarse la cola (comportamiento clásico). | Alta |
 
 ### Flujo de usuario principal
 
@@ -246,7 +247,7 @@ pub trait Player: Send + Sync {
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (cicla los habilitados en `[general] providers`) |
-| r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al agotarse la cola, encola pistas relacionadas) |
+| r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al empezar la última pista de la cola, encola pistas relacionadas por adelantado) |
 | R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares (mix RD de YouTube) → random (artista al azar de favoritos) → random género (palabra clave al azar) → rarezas (deep cuts del artista) |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
 | Enter / a / A / d / J / K / Esc | Overlay: contenido | Reproducir / encolar / reproducir toda / quitar / reordenar / volver |
@@ -322,6 +323,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **8** | Extras: caché de búsquedas en memoria (`[cache]`, decorador `CachingProvider`), modo radio (tecla `r`, sub-modos con `R`: artista, similares vía mix RD de YouTube, random desde favoritos, random género, rarezas) y metadatos de publicación en crates.io — **completada** (la publicación en crates.io/Homebrew/scoop queda como paso manual del autor) |
 | **9** | Prioridades de reproducción y UX: seek dentro de la pista (`←`/`→`, `seek` en el trait `Player`), modos de repetición (off → all → one), shuffle de la cola, overlay de ayuda contextual con `?` — **completada** |
 | 9.1 | Bug (panic): `cannot convert float seconds to Duration: value is negative` (`core/src/time.rs`). mpv puede reportar `time-pos` negativo (buffering inicial o seek antes del inicio) y `Duration::from_secs_f64` panicua con negativos en `src/player/mpv.rs` (`status()`, helper `secs_to_duration`); también clamado en `src/providers/ytdlp.rs` (`parse_entry`, duración inválida). Viola RNF-4 (ningún error produce panic) — **completada** |
+| 9.2 | Prefetch de radio: la expansión se dispara al empezar a sonar la última pista de la cola (antes: al agotarse), encolando la tanda siguiente en segundo plano sin interrumpir; al terminar la pista la siguiente entra sin pausa. Guardas: `radio_expanded_for` (no duplicar búsquedas ni martillear yt-dlp tras fallos) y `playback_active` (RadioDone solo auto-reproduce con el reproductor parado) — **completada** |
 | 10 | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists |
 | 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
 | 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |

@@ -154,7 +154,7 @@ Con la caja de búsqueda enfocada, `↑`/`↓` recorren las búsquedas recientes
 
 ## Modo radio
 
-Con `r` activas el modo radio (estado inicial configurable en `[radio] enabled`; la barra del reproductor muestra `radio:ON·<modo>`). Cuando la cola se agota al terminar la última pista, ShellMusic encola hasta 5 pistas nuevas según el sub-modo activo, que se cicla con `R`:
+Con `r` activas el modo radio (estado inicial configurable en `[radio] enabled`; la barra del reproductor muestra `radio:ON·<modo>`). Cuando empieza a sonar la última pista de la cola, ShellMusic busca en segundo plano y encola hasta 5 pistas nuevas según el sub-modo activo (que se cicla con `R`), de modo que al terminar la pista la siguiente ya está en cola y entra sin pausa:
 
 - **artista**: pistas del último artista sonado.
 - **similares**: el mix autogenerado de YouTube para la última pista (la radio `RD` real de YouTube; en SoundCloud, fallback a búsqueda por artista + título).
@@ -162,7 +162,7 @@ Con `r` activas el modo radio (estado inicial configurable en `[radio] enabled`;
 - **random género**: una palabra clave de género/década al azar ("80s rock", "bossa nova", …).
 - **rarezas**: pistas menos conocidas del último artista (descarta los primeros hits y baraja el resto).
 
-En todos los modos se excluyen las pistas ya reproducidas o encoladas, y no entran dos versiones de la misma canción (dedupe por título normalizado). Si no hay nada nuevo, la reproducción se detiene con un aviso. El modo inicial se configura con `[radio] mode`.
+En todos los modos se excluyen las pistas ya reproducidas o encoladas, y no entran dos versiones de la misma canción (dedupe por título normalizado). Si no hay nada nuevo, la reproducción se detiene al agotarse la cola con un aviso. El modo inicial se configura con `[radio] mode`.
 
 ## Bloqueo anti-bot de YouTube
 

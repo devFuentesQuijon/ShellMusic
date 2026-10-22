@@ -57,6 +57,7 @@ pub(super) fn handle_msg(
             let candidates =
                 radio_candidates(&tracks, &app.queue, &app.played, &occupied, RADIO_TRACKS);
             if candidates.is_empty() {
+                app.radio_expanded_for = None;
                 app.message = Some(Message::info(format!(
                     "radio: sin pistas nuevas de «{artist}»; fin de la cola"
                 )));
@@ -72,13 +73,19 @@ pub(super) fn handle_msg(
                 app.message = Some(Message::info(format!(
                     "Radio: {count} pistas relacionadas con {artist}"
                 )));
-                play_queue_track(app, player, tx, first);
+                // Prefetch con la última pista aún sonando: solo encolar.
+                // Cola agotada (reproductor parado): arrancar la primera.
+                if !app.playback_active {
+                    play_queue_track(app, player, tx, first);
+                }
             }
         }
         AppMsg::RadioDone(artist, Err(err), epoch) => {
             if !app.radio || epoch != app.radio_epoch {
                 return;
             }
+            // Permite reintentar la expansión al agotarse la cola.
+            app.radio_expanded_for = None;
             app.message = Some(Message::error(format!(
                 "radio: búsqueda de «{artist}» fallida: {err}"
             )));
@@ -158,6 +165,7 @@ pub(super) fn play_queue_track(
     app.queue.current = Some(index);
     // Invalida cualquier expansión de radio en vuelo: hay reproducción nueva.
     app.radio_epoch += 1;
+    app.playback_active = true;
     app.played.insert((
         app.queue.tracks[index].provider,
         app.queue.tracks[index].id.clone(),
@@ -173,17 +181,20 @@ pub(super) fn play_queue_track(
     )));
     let url = app.queue.tracks[index].source_url.clone();
     let player = Arc::clone(player);
-    let tx = tx.clone();
+    let play_tx = tx.clone();
     tokio::spawn(async move {
         match player.play(&url).await {
             Ok(()) => {
-                let _ = tx.send(AppMsg::PlaybackStarted);
+                let _ = play_tx.send(AppMsg::PlaybackStarted);
             }
             Err(err) => {
-                let _ = tx.send(AppMsg::Error(format!("no se pudo reproducir: {err}")));
+                let _ = play_tx.send(AppMsg::Error(format!("no se pudo reproducir: {err}")));
             }
         }
     });
+    // Si esta es la última pista de la cola, pide ya la próxima tanda de la
+    // radio para que esté encolada antes de que termine.
+    radio_prefetch(app, tx);
 }
 
 pub(super) fn play_adjacent(
@@ -207,6 +218,7 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
     if app.queue.current.is_none() {
         return;
     }
+    app.playback_active = false;
     if app.repeat == RepeatMode::One {
         play_queue_track(app, player, tx, app.queue.current.unwrap());
         return;
@@ -220,7 +232,9 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
         return;
     }
     if app.radio {
-        radio_expand(app, tx);
+        // Si el prefetch de la pista que acaba de terminar sigue en vuelo,
+        // no duplica la búsqueda: RadioDone arrancará la reproducción.
+        radio_prefetch(app, tx);
     }
 }
 
@@ -271,6 +285,27 @@ const RANDOM_GENERO_KEYWORDS: &[&str] = &[
     "70s funk",
     "2000s indie rock",
 ];
+
+/// Lanza la expansión de radio si la pista actual es la última de la cola y
+/// aún no se pidió tanda para ella. Se usa tanto al empezar la última pista
+/// (prefetch) como al agotarse la cola sin prefetch previo (red de seguridad).
+pub(super) fn radio_prefetch(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
+    if !app.radio || app.repeat != RepeatMode::Off {
+        return;
+    }
+    let Some(current) = app.queue.current_track() else {
+        return;
+    };
+    if app.queue.next_index().is_some() {
+        return;
+    }
+    let id = (current.provider, current.id.clone());
+    if app.radio_expanded_for.as_ref() == Some(&id) {
+        return;
+    }
+    app.radio_expanded_for = Some(id);
+    radio_expand(app, tx);
+}
 
 fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     let Some(track) = app.queue.current_track().cloned() else {
@@ -755,5 +790,118 @@ mod tests {
         );
         assert!(app.queue.is_empty());
         assert_eq!(app.queue.current, None);
+    }
+
+    struct MockProvider;
+
+    #[async_trait::async_trait]
+    impl MusicProvider for MockProvider {
+        async fn search(&self, _query: &str, _limit: usize) -> Result<Vec<Track>> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn app_with_provider(name: &str) -> App {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-{name}-{}", std::process::id())),
+        )
+        .unwrap();
+        app.providers = vec![(ProviderKind::Youtube, Arc::new(MockProvider))];
+        app
+    }
+
+    #[tokio::test]
+    async fn radio_done_con_reproduccion_activa_solo_encola() {
+        let mut app = app_with_provider("radiodone-activa");
+        app.radio = true;
+        app.playback_active = true;
+        app.queue.add(track("a"));
+        app.queue.current = Some(0);
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // Prefetch: la última pista sigue sonando, las nuevas solo se encolan.
+        let epoch = app.radio_epoch;
+        handle_msg(
+            &mut app,
+            AppMsg::RadioDone("artista".to_string(), Ok(vec![track("x"), track("y")]), epoch),
+            &player,
+            &tx,
+        );
+        assert_eq!(app.queue.len(), 3);
+        assert_eq!(app.queue.current, Some(0), "no interrumpe lo que suena");
+    }
+
+    #[tokio::test]
+    async fn radio_done_error_permite_reintento() {
+        let mut app = app_with_provider("radiodone-error");
+        app.radio = true;
+        app.radio_expanded_for = Some((ProviderKind::Youtube, "a".to_string()));
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let epoch = app.radio_epoch;
+        handle_msg(
+            &mut app,
+            AppMsg::RadioDone("artista".to_string(), Err("fallo".to_string()), epoch),
+            &player,
+            &tx,
+        );
+        assert_eq!(app.radio_expanded_for, None, "limpia para reintentar");
+    }
+
+    #[tokio::test]
+    async fn prefetch_se_lanza_al_empezar_ultima_pista() {
+        let mut app = app_with_provider("prefetch-lanza");
+        app.radio = true;
+        app.repeat = RepeatMode::Off;
+        app.radio_mode = RadioMode::Artista;
+        app.queue.add(track("a"));
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        play_queue_track(&mut app, &player, &tx, 0);
+        assert_eq!(
+            app.radio_expanded_for,
+            Some((ProviderKind::Youtube, "a".to_string()))
+        );
+        assert!(
+            app.message.as_ref().is_some_and(|m| m.text.contains("buscando")),
+            "mensaje de búsqueda en curso"
+        );
+
+        // Segunda llamada para la misma pista: no relanza la búsqueda.
+        app.message = None;
+        radio_prefetch(&mut app, &tx);
+        assert!(app.message.is_none(), "no duplica la expansión");
+    }
+
+    #[tokio::test]
+    async fn prefetch_no_se_lanza_con_repeat_all_ni_con_siguiente_en_cola() {
+        let mut app = app_with_provider("prefetch-norepeat");
+        app.radio = true;
+        app.repeat = RepeatMode::All;
+        app.radio_mode = RadioMode::Artista;
+        app.queue.add(track("a"));
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        play_queue_track(&mut app, &player, &tx, 0);
+        assert_eq!(app.radio_expanded_for, None, "repeat all no usa radio");
+
+        let mut app = app_with_provider("prefetch-con-siguiente");
+        app.radio = true;
+        app.repeat = RepeatMode::Off;
+        app.radio_mode = RadioMode::Artista;
+        app.queue.add(track("a"));
+        app.queue.add(track("b"));
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        play_queue_track(&mut app, &player, &tx, 0);
+        assert_eq!(
+            app.radio_expanded_for, None,
+            "hay siguiente en cola: sin prefetch"
+        );
     }
 }

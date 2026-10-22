@@ -10,7 +10,8 @@ use crate::queue::Queue;
 use super::AppMsg;
 use super::playback::{
     add_to_queue, change_volume, play_adjacent, play_queue_track, play_result,
-    remove_from_queue, seek_by, shuffle_queue, spawn_player, submit_search, toggle_favorite,
+    radio_prefetch, remove_from_queue, seek_by, shuffle_queue, spawn_player, submit_search,
+    toggle_favorite,
 };
 use super::state::{App, Focus, Message, NameContext, Overlay};
 
@@ -207,6 +208,7 @@ fn playback_key(
         KeyCode::Char('s') => {
             app.queue.current = None;
             app.radio_epoch += 1;
+            app.playback_active = false;
             app.message = Some(Message::info("detenido"));
             spawn_player(player, tx, |p| async move { p.stop().await });
         }
@@ -227,7 +229,11 @@ fn playback_key(
             }
         }
         KeyCode::Char('m') => app.next_provider(),
-        KeyCode::Char('r') => app.toggle_radio(),
+        KeyCode::Char('r') => {
+            app.toggle_radio();
+            // Si suena la última pista de la cola, prefetch inmediato.
+            radio_prefetch(app, tx);
+        }
         KeyCode::Char('R') => app.next_radio_mode(),
         _ => {}
     }
