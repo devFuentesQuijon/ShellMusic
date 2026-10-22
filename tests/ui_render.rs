@@ -164,3 +164,16 @@ fn player_bar_shows_repeat_mode() {
     let screen = render(&mut app);
     assert!(screen.contains("rep:all"), "indicador de repetición:\n{screen}");
 }
+
+#[test]
+fn player_bar_truncates_long_titles() {
+    let mut app = test_app();
+    app.queue.add(track("a", &"Título extremadamente largo ".repeat(10)));
+    app.queue.current = Some(0);
+    app.radio = true;
+
+    let screen = render(&mut app);
+    // Los metadatos del final de la barra no se pierden con títulos largos.
+    assert!(screen.contains("radio:ON"), "indicadores visibles:\n{screen}");
+    assert!(screen.contains('…'), "título truncado:\n{screen}");
+}
