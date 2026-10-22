@@ -1,4 +1,5 @@
 pub mod favorites;
+pub mod help;
 pub mod player_bar;
 pub mod playlists;
 pub mod queue;
@@ -11,15 +12,15 @@ use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style};
 use ratatui::widgets::Paragraph;
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, Overlay};
 
 const HELP_SEARCH: &str = "Enter buscar · Tab panel · Esc resultados · Ctrl+C salir";
 const HELP_RESULTS: &str =
-    "Enter reproducir · a cola · f favorito · A playlist · m proveedor · r radio · Tab · / · q salir";
+    "Enter reproducir · a cola · f favorito · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
 const HELP_QUEUE: &str =
-    "Enter reproducir · d eliminar · J/K mover · f ★ · P playlists · m prov · r radio · n/p · q salir";
+    "Enter reproducir · d eliminar · J/K mover · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
 const HELP_FAVORITES: &str =
-    "Enter reproducir · a cola · d/f quitar · A playlist · m prov · r radio · q salir";
+    "Enter reproducir · a cola · d/f quitar · ←/→ seek · l repetir · ? ayuda · q salir";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let [search_area, middle_area, status_area, player_area] = Layout::vertical([
@@ -44,6 +45,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_status(frame, app, status_area);
     player_bar::draw(frame, app, player_area);
     playlists::draw(frame, app);
+    help::draw(frame, app);
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -51,15 +53,15 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Some(msg) if msg.is_error => (msg.text.clone(), Style::new().fg(Color::Red)),
         Some(msg) => (msg.text.clone(), Style::new().fg(Color::Yellow)),
         None => (
-            if !matches!(app.overlay, crate::app::Overlay::Closed) {
-                "playlists: las teclas se muestran dentro del panel"
-            } else {
-                match app.focus {
+            match app.overlay {
+                Overlay::Closed => match app.focus {
                     Focus::Searching => HELP_SEARCH,
                     Focus::Browsing => HELP_RESULTS,
                     Focus::Queue => HELP_QUEUE,
                     Focus::Favorites => HELP_FAVORITES,
-                }
+                },
+                Overlay::Help => "ayuda: Esc cierra",
+                _ => "playlists: las teclas se muestran dentro del panel",
             }
             .to_string(),
             Style::new().fg(Color::DarkGray),

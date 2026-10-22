@@ -55,8 +55,12 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | d / f | Favoritos | Quitar de favoritos |
 | Espacio | Resultados / Cola / Favoritos | Play / pausa |
 | s | Resultados / Cola / Favoritos | Stop |
+| ← / → | Resultados / Cola / Favoritos | Seek ∓5 s dentro de la pista (con Shift: ∓30 s) |
 | + / - | Resultados / Cola / Favoritos | Volumen arriba / abajo |
 | n / p | Resultados / Cola / Favoritos | Siguiente / anterior pista de la cola (sin bucle) |
+| l | Resultados / Cola / Favoritos | Ciclar repetición: off → toda la cola → pista actual |
+| S | Resultados / Cola / Favoritos | Barajar la cola (la pista que suena mantiene su lugar) |
+| ? | Resultados / Cola / Favoritos | Ayuda de atajos (overlay; se cierra con Esc o ?) |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
@@ -101,6 +105,16 @@ El panel derecho muestra la cola: posición, título, artista y duración, con `
 
 - Al terminar una pista de forma natural, avanza automáticamente a la siguiente de la cola (autoplay). `s` (stop) no dispara autoplay.
 - Si eliminas con `d` la pista que está sonando, se reproduce la que ocupa su lugar; si era la última, se detiene.
+
+## Repetición y orden aleatorio
+
+`l` cicla el modo de repetición (la barra del reproductor muestra `rep:all` o `rep:1`):
+
+- **off** (por defecto): al acabar la cola se detiene, o entra el modo radio si está activo.
+- **toda la cola**: al terminar la última pista, la cola vuelve a empezar por la primera.
+- **pista actual**: repite en bucle la pista que suena.
+
+`S` baraja el orden de la cola; la pista en reproducción conserva su posición. La repetición actúa solo al terminar la pista de forma natural: `n`/`p` manuales siguen sin hacer bucle.
 
 ## Configuración
 

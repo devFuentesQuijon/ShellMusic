@@ -115,6 +115,48 @@ impl std::fmt::Display for RadioMode {
     }
 }
 
+/// Modo de repetición al terminar una pista de forma natural.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RepeatMode {
+    /// Al acabar la cola, se detiene (o entra la radio si está activa).
+    #[default]
+    Off,
+    /// Al llegar al final de la cola, vuelve a empezar por la primera.
+    All,
+    /// Repite la pista actual en bucle.
+    One,
+}
+
+impl RepeatMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::All,
+            Self::All => Self::One,
+            Self::One => Self::Off,
+        }
+    }
+
+    /// Etiqueta corta para la barra del reproductor; vacía si está inactivo.
+    pub fn bar_label(self) -> &'static str {
+        match self {
+            Self::Off => "",
+            Self::All => "  rep:all",
+            Self::One => "  rep:1",
+        }
+    }
+}
+
+impl std::fmt::Display for RepeatMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Off => "desactivada",
+            Self::All => "toda la cola",
+            Self::One => "pista actual",
+        };
+        write!(f, "{name}")
+    }
+}
+
 /// Estado del overlay modal de playlists.
 #[derive(Debug, Clone)]
 pub enum Overlay {
@@ -127,6 +169,8 @@ pub enum Overlay {
     NameInput(NameContext),
     /// Selector de playlist para añadir la pista dada.
     Pick(Track),
+    /// Ayuda contextual de atajos de teclado.
+    Help,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +204,7 @@ pub struct App {
     pub active_provider: usize,
     pub radio: bool,
     pub radio_mode: RadioMode,
+    pub repeat: RepeatMode,
     pub played: HashSet<(ProviderKind, String)>,
     /// Títulos normalizados ya reproducidos: la radio no encola otra versión
     /// de la misma canción.
@@ -221,6 +266,7 @@ impl App {
             active_provider: 0,
             radio: config.radio.enabled,
             radio_mode: RadioMode::from_name(&config.radio.mode).unwrap_or_default(),
+            repeat: RepeatMode::default(),
             played: HashSet::new(),
             played_titles: HashSet::new(),
             radio_epoch: 0,
@@ -273,6 +319,12 @@ impl App {
             "Modo radio: {}{note}",
             self.radio_mode
         )));
+    }
+
+    /// Cicla el modo de repetición (tecla l): off → toda la cola → pista actual.
+    pub fn next_repeat_mode(&mut self) {
+        self.repeat = self.repeat.next();
+        self.message = Some(Message::info(format!("Repetición: {}", self.repeat)));
     }
 
     pub(super) fn selected(&self) -> Option<usize> {

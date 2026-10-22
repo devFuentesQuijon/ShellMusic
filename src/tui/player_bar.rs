@@ -23,14 +23,16 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 String::new()
             };
             let label = format!(
-                "{icon} {} — {}  {}/{}  cola {}/{}  vol:{}{radio}",
+                "{icon} {} — {}  {}/{}  cola {}/{}  vol:{}{}{}",
                 track.title,
                 track.artist,
                 fmt_duration(app.status.position),
                 fmt_duration(app.status.duration.or(track.duration)),
                 position,
                 app.queue.len(),
-                app.status.volume
+                app.status.volume,
+                app.repeat.bar_label(),
+                radio
             );
             (ratio, label)
         }
@@ -42,7 +44,12 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             };
             (
                 0.0,
-                format!("Sin reproducción · vol:{}{radio}", app.status.volume),
+                format!(
+                    "Sin reproducción · vol:{}{}{}",
+                    app.status.volume,
+                    app.repeat.bar_label(),
+                    radio
+                ),
             )
         }
     };

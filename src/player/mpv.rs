@@ -365,6 +365,16 @@ impl Player for MpvPlayer {
         Ok(())
     }
 
+    async fn seek(&self, seconds: i32) -> Result<()> {
+        self.command(vec![
+            "seek".into(),
+            seconds.to_string().into(),
+            "relative".into(),
+        ])
+        .await?;
+        Ok(())
+    }
+
     async fn set_volume(&self, volume: u8) -> Result<()> {
         self.command(vec![
             "set_property".into(),

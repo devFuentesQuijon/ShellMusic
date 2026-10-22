@@ -7,13 +7,14 @@ use super::fmt_duration;
 use crate::app::{App, NameContext, Overlay};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    if matches!(app.overlay, Overlay::Closed) {
+    // El overlay de ayuda lo dibuja su propio módulo.
+    if matches!(app.overlay, Overlay::Closed | Overlay::Help) {
         return;
     }
     let area = centered(frame.area(), 60, 60);
     frame.render_widget(Clear, area);
     match app.overlay.clone() {
-        Overlay::Closed => {}
+        Overlay::Closed | Overlay::Help => {}
         Overlay::List => draw_list(frame, app, area),
         Overlay::Content(playlist) => draw_content(frame, app, area, playlist),
         Overlay::NameInput(context) => draw_name_input(frame, app, area, &context),
@@ -21,7 +22,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
+pub(super) fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     let [vertical] = Layout::vertical([Constraint::Percentage(percent_y)])
         .flex(Flex::Center)
         .areas(area);
@@ -31,7 +32,7 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     horizontal
 }
 
-fn block(title: String) -> Block<'static> {
+pub(super) fn block(title: String) -> Block<'static> {
     Block::bordered()
         .title(title)
         .border_style(Style::new().fg(Color::Cyan))

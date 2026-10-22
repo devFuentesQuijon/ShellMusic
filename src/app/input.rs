@@ -10,11 +10,13 @@ use crate::queue::Queue;
 use super::AppMsg;
 use super::playback::{
     add_to_queue, change_volume, play_adjacent, play_queue_track, play_result,
-    remove_from_queue, spawn_player, submit_search, toggle_favorite,
+    remove_from_queue, seek_by, shuffle_queue, spawn_player, submit_search, toggle_favorite,
 };
 use super::state::{App, Focus, Message, NameContext, Overlay};
 
 const VOLUME_STEP: i16 = 5;
+const SEEK_STEP: i32 = 5;
+const SEEK_STEP_LARGE: i32 = 30;
 
 pub(super) fn handle_key(
     app: &mut App,
@@ -210,6 +212,11 @@ fn playback_key(
         }
         KeyCode::Char('+') | KeyCode::Char('=') => change_volume(app, player, tx, VOLUME_STEP),
         KeyCode::Char('-') => change_volume(app, player, tx, -VOLUME_STEP),
+        KeyCode::Left => seek_by(app, player, tx, -seek_step(key)),
+        KeyCode::Right => seek_by(app, player, tx, seek_step(key)),
+        KeyCode::Char('l') => app.next_repeat_mode(),
+        KeyCode::Char('S') => shuffle_queue(app),
+        KeyCode::Char('?') => app.overlay = Overlay::Help,
         KeyCode::Char('n') => play_adjacent(app, player, tx, Queue::next_index, "fin de la cola"),
         KeyCode::Char('p') => play_adjacent(app, player, tx, Queue::prev_index, "inicio de la cola"),
         KeyCode::Char('P') => {
@@ -223,6 +230,15 @@ fn playback_key(
         KeyCode::Char('r') => app.toggle_radio(),
         KeyCode::Char('R') => app.next_radio_mode(),
         _ => {}
+    }
+}
+
+/// Paso de seek según el modificador: ±5 s, con Shift ±30 s.
+fn seek_step(key: KeyEvent) -> i32 {
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        SEEK_STEP_LARGE
+    } else {
+        SEEK_STEP
     }
 }
 
@@ -250,6 +266,10 @@ fn handle_overlay_key(
         Overlay::Content(playlist) => overlay_content_key(app, key, player, tx, playlist),
         Overlay::NameInput(context) => overlay_name_key(app, key, context),
         Overlay::Pick(track) => overlay_pick_key(app, key, track),
+        Overlay::Help => match key.code {
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => app.overlay = Overlay::Closed,
+            _ => {}
+        },
     }
 }
 

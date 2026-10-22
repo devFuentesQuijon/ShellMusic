@@ -9,7 +9,7 @@ use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
-use super::state::{App, Focus, Message, RadioMode};
+use super::state::{App, Focus, Message, RadioMode, RepeatMode};
 
 pub(super) fn handle_msg(
     app: &mut App,
@@ -207,13 +207,46 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
     if app.queue.current.is_none() {
         return;
     }
+    if app.repeat == RepeatMode::One {
+        play_queue_track(app, player, tx, app.queue.current.unwrap());
+        return;
+    }
     if let Some(index) = app.queue.next_index() {
         play_queue_track(app, player, tx, index);
+        return;
+    }
+    if app.repeat == RepeatMode::All && !app.queue.is_empty() {
+        play_queue_track(app, player, tx, 0);
         return;
     }
     if app.radio {
         radio_expand(app, tx);
     }
+}
+
+/// ←/→: salto relativo dentro de la pista en reproducción.
+pub(super) fn seek_by(
+    app: &mut App,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    seconds: i32,
+) {
+    if app.queue.current.is_none() {
+        app.message = Some(Message::info("nada en reproducción"));
+        return;
+    }
+    app.message = Some(Message::info(format!("seek {seconds:+} s")));
+    spawn_player(player, tx, move |p| async move { p.seek(seconds).await });
+}
+
+/// S: baraja la cola manteniendo la pista que suena en su sitio.
+pub(super) fn shuffle_queue(app: &mut App) {
+    if app.queue.len() < 2 {
+        app.message = Some(Message::info("cola demasiado corta para barajar"));
+        return;
+    }
+    app.queue.shuffle();
+    app.message = Some(Message::info("cola barajada"));
 }
 
 const RADIO_TRACKS: usize = 5;
@@ -595,12 +628,71 @@ mod tests {
         async fn stop(&self) -> Result<()> {
             Ok(())
         }
+        async fn seek(&self, _seconds: i32) -> Result<()> {
+            Ok(())
+        }
         async fn set_volume(&self, _volume: u8) -> Result<()> {
             Ok(())
         }
         async fn status(&self) -> Result<crate::player::PlaybackStatus> {
             Ok(crate::player::PlaybackStatus::default())
         }
+    }
+
+    #[tokio::test]
+    async fn autoplay_repeat_one_replays_current() {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-repeat1-{}", std::process::id())),
+        )
+        .unwrap();
+        app.queue.add(track("a"));
+        app.queue.add(track("b"));
+        app.queue.current = Some(1);
+        app.repeat = RepeatMode::One;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        autoplay_next(&mut app, &player, &tx);
+        assert_eq!(app.queue.current, Some(1), "repite la misma pista");
+    }
+
+    #[tokio::test]
+    async fn autoplay_repeat_all_wraps_to_first() {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-repeatall-{}", std::process::id())),
+        )
+        .unwrap();
+        app.queue.add(track("a"));
+        app.queue.add(track("b"));
+        app.queue.current = Some(1); // última de la cola
+        app.repeat = RepeatMode::All;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        autoplay_next(&mut app, &player, &tx);
+        assert_eq!(app.queue.current, Some(0), "vuelve a la primera");
+    }
+
+    #[tokio::test]
+    async fn autoplay_repeat_off_stops_at_end() {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!("shellmusic-repeatoff-{}", std::process::id())),
+        )
+        .unwrap();
+        app.queue.add(track("a"));
+        app.queue.current = Some(0);
+        app.repeat = RepeatMode::Off;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        autoplay_next(&mut app, &player, &tx);
+        // Sin repetición ni radio no hay reproducción nueva: la cola queda
+        // como estaba y no se encola nada.
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.queue.current, Some(0));
     }
 
     #[tokio::test]

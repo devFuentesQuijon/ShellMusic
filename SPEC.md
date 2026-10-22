@@ -91,6 +91,10 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-20 | `A` sobre una pista (Resultados/Cola/Favoritos) abre el selector "añadir a playlist" (playlists existentes + "nueva playlist…"); dedup por (provider, id) dentro de la playlist. Nombres de playlist únicos: duplicado → error amable en la línea de estado. | Alta |
 | RF-21 | Las playlists persisten en `playlists.json` (mismo dir de datos, mismo formato con `version`, escritura atómica, corrupto → `.bak` + aviso, sin panic). El overlay es modal: captura todas las teclas salvo Ctrl+C. | Alta |
 | RF-22 | Con la caja de búsqueda enfocada, `↑`/`↓` recorren el historial de búsquedas (estilo shell: al bajar de la más reciente se restaura el borrador en curso). Persisten las últimas 50 en `history.json` (mismo dir de datos, mismo formato y escritura atómica que favoritos/playlists). | Media |
+| RF-23 | `←`/`→` hacen seek relativo dentro de la pista (±5 s; con Shift ±30 s) vía `Player::seek`; sin reproducción activa se avisa en la línea de estado. | Alta |
+| RF-24 | `l` cicla el modo de repetición (off → toda la cola → pista actual), aplicado en el autoplay al terminar la pista de forma natural: `all` vuelve a la primera de la cola, `one` repite la pista; la barra del reproductor muestra `rep:all`/`rep:1`. La radio solo entra con repetición off. | Alta |
+| RF-25 | `S` baraja la cola en el sitio manteniendo la pista en reproducción en su posición. | Media |
+| RF-26 | `?` abre un overlay modal de ayuda con los atajos por contexto (se cierra con Esc, `?` o Enter); el pie de cada panel apunta a `? ayuda`. | Media |
 
 ### Flujo de usuario principal
 
@@ -169,7 +173,8 @@ src/
     ├── queue.rs       # panel de cola de reproducción
     ├── favorites.rs   # panel de favoritos
     ├── playlists.rs   # overlay modal de playlists
-    └── player_bar.rs  # progreso, volumen, track actual, posición en cola
+    ├── help.rs        # overlay modal de ayuda de atajos (tecla ?)
+    └── player_bar.rs  # progreso, volumen, track actual, posición en cola, repetición
 ```
 
 ### Contratos clave
@@ -194,6 +199,7 @@ pub trait Player: Send + Sync {
     async fn play(&self, url: &str) -> Result<()>;
     async fn toggle_pause(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
+    async fn seek(&self, seconds: i32) -> Result<()>;        // salto relativo en la pista
     async fn set_volume(&self, volume: u8) -> Result<()>;   // 0-100
     async fn status(&self) -> Result<PlaybackStatus>;        // posición, duración, pausado
 }
@@ -229,8 +235,12 @@ pub trait Player: Send + Sync {
 | d / f | Favoritos | Quitar de favoritos |
 | Espacio | Resultados / Cola / Favoritos | Play / pausa |
 | s | Resultados / Cola / Favoritos | Stop (sin autoplay posterior) |
+| ← / → | Resultados / Cola / Favoritos | Seek ∓5 s (con Shift: ∓30 s) |
 | + / - | Resultados / Cola / Favoritos | Volumen arriba / abajo |
 | n / p | Resultados / Cola / Favoritos | Siguiente / anterior pista de la cola (sin bucle) |
+| l | Resultados / Cola / Favoritos | Ciclar repetición: off → toda la cola → pista actual |
+| S | Resultados / Cola / Favoritos | Barajar la cola (la pista actual conserva su posición) |
+| ? | Resultados / Cola / Favoritos | Overlay modal de ayuda de atajos (Esc/? cierra) |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
@@ -310,6 +320,12 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **6** | Provider SoundCloud (búsqueda vía yt-dlp `scsearch`) + selector de proveedor en la TUI (tecla `m`, `[general] providers` / `default_provider`) — **completada** |
 | 7 | Provider Apple Music — **pospuesta**: misma razón que la fase 5, agravada por la cuenta de desarrollador de pago |
 | **8** | Extras: caché de búsquedas en memoria (`[cache]`, decorador `CachingProvider`), modo radio (tecla `r`, sub-modos con `R`: artista, similares vía mix RD de YouTube, random desde favoritos, random género, rarezas) y metadatos de publicación en crates.io — **completada** (la publicación en crates.io/Homebrew/scoop queda como paso manual del autor) |
+| **9** | Prioridades de reproducción y UX: seek dentro de la pista (`←`/`→`, `seek` en el trait `Player`), modos de repetición (off → all → one), shuffle de la cola, overlay de ayuda contextual con `?` — **completada** |
+| 10 | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists |
+| 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
+| 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |
+| 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") |
+| 14 | Pulido: cola persistente entre sesiones (restaurar cola + pista + posición al arrancar); temas de color configurables en `config.toml` |
 
 ---
 

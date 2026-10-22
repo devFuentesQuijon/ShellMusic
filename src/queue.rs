@@ -95,6 +95,26 @@ impl Queue {
         self.move_up(index + 1)
     }
 
+    /// Baraja la cola en el sitio; la pista que suena mantiene su posición.
+    pub fn shuffle(&mut self) {
+        let Some(current) = self.current else {
+            crate::random::shuffle(&mut self.tracks);
+            return;
+        };
+        if current >= self.tracks.len() {
+            return;
+        }
+        let playing = self.tracks[current].clone();
+        crate::random::shuffle(&mut self.tracks);
+        if let Some(pos) = self
+            .tracks
+            .iter()
+            .position(|t| t.provider == playing.provider && t.id == playing.id)
+        {
+            self.tracks.swap(pos, current);
+        }
+    }
+
     /// Índice de la siguiente pista; None si no hay actual o es la última.
     pub fn next_index(&self) -> Option<usize> {
         match self.current {
@@ -214,5 +234,27 @@ mod tests {
         assert_eq!(queue.prev_index(), Some(1));
         let empty = Queue::new();
         assert_eq!(empty.next_index(), None);
+    }
+
+    #[test]
+    fn shuffle_keeps_membership_and_current_track() {
+        let mut queue = queue3();
+        queue.current = Some(1); // suena "b"
+        queue.shuffle();
+        let mut ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(queue.current, Some(1));
+        assert_eq!(queue.current_track().unwrap().id, "b");
+    }
+
+    #[test]
+    fn shuffle_without_current_just_shuffles() {
+        let mut queue = queue3();
+        queue.shuffle();
+        assert_eq!(queue.current, None);
+        let mut ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 }

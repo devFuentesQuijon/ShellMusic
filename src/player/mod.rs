@@ -47,6 +47,8 @@ pub trait Player: Send + Sync {
     async fn play(&self, url: &str) -> Result<()>;
     async fn toggle_pause(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
+    /// Salto relativo dentro de la pista (segundos, puede ser negativo).
+    async fn seek(&self, seconds: i32) -> Result<()>;
     async fn set_volume(&self, volume: u8) -> Result<()>;
     async fn status(&self) -> Result<PlaybackStatus>;
 }

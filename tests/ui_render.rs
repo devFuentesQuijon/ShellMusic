@@ -140,3 +140,27 @@ fn pick_overlay_offers_new_playlist_entry() {
     assert!(screen.contains("Añadir a playlist: Canción X"), "título pick:\n{screen}");
     assert!(screen.contains("+ nueva playlist…"), "entrada nueva:\n{screen}");
 }
+
+#[test]
+fn help_overlay_lists_keybindings() {
+    use shellmusic::app::Overlay;
+    let mut app = test_app();
+    app.overlay = Overlay::Help;
+    let screen = render(&mut app);
+    assert!(screen.contains("Ayuda"), "título de ayuda:\n{screen}");
+    assert!(screen.contains("seek"), "seek documentado:\n{screen}");
+    assert!(screen.contains("repetición"), "repetición documentada:\n{screen}");
+    assert!(screen.contains("barajar"), "shuffle documentado:\n{screen}");
+}
+
+#[test]
+fn player_bar_shows_repeat_mode() {
+    use shellmusic::app::RepeatMode;
+    let mut app = test_app();
+    app.queue.add(track("a", "Primera"));
+    app.queue.current = Some(0);
+    app.repeat = RepeatMode::All;
+
+    let screen = render(&mut app);
+    assert!(screen.contains("rep:all"), "indicador de repetición:\n{screen}");
+}
