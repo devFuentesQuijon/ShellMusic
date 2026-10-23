@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
 use super::fmt_duration;
@@ -9,7 +9,7 @@ use crate::app::{App, Focus};
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Queue;
     let border_style = if focused {
-        Style::new().fg(Color::Cyan)
+        Style::new().fg(app.theme.accent)
     } else {
         Style::default()
     };

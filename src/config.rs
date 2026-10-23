@@ -27,6 +27,13 @@ ttl_minutes = 15    # 1-120
 [radio]
 enabled = false     # al agotarse la cola, encola pistas relacionadas (se alterna con la tecla r)
 mode = \"artista\"    # artista | similares | random | random-genero | rarezas (se cicla con R)
+
+[theme]
+accent = \"cyan\"        # bordes del panel enfocado y títulos de sección
+highlight = \"yellow\"   # mensajes informativos y teclas en la ayuda
+error = \"red\"          # mensajes de error
+muted = \"darkgray\"     # línea de hints y texto secundario
+progress = \"green\"     # barra de progreso
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -37,6 +44,7 @@ pub struct Config {
     pub youtube: Youtube,
     pub cache: Cache,
     pub radio: Radio,
+    pub theme: ThemeConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,6 +117,34 @@ pub struct Radio {
     pub enabled: bool,
     /// artista | similares | random | random-genero | rarezas
     pub mode: String,
+}
+
+/// Colores de la TUI (sección `[theme]`); se resuelven a `crate::theme::Theme`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ThemeConfig {
+    /// Bordes del panel enfocado y títulos de sección.
+    pub accent: String,
+    /// Mensajes informativos y teclas en la ayuda.
+    pub highlight: String,
+    /// Mensajes de error.
+    pub error: String,
+    /// Línea de hints y texto secundario.
+    pub muted: String,
+    /// Barra de progreso del reproductor.
+    pub progress: String,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            accent: "cyan".to_string(),
+            highlight: "yellow".to_string(),
+            error: "red".to_string(),
+            muted: "darkgray".to_string(),
+            progress: "green".to_string(),
+        }
+    }
 }
 
 impl Config {

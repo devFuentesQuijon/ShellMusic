@@ -38,7 +38,7 @@ async fn auto_mode_fast_path_and_session_cache() {
         .await
         .expect("mpv debe lanzarse");
 
-    player.play(URL_1).await.expect("el modo auto debe reproducir");
+    player.play(URL_1, None).await.expect("el modo auto debe reproducir");
     let mut retried = Vec::new();
     while let Ok(event) = events.try_recv() {
         if let PlayerEvent::Notice(notice) = event {
@@ -50,7 +50,7 @@ async fn auto_mode_fast_path_and_session_cache() {
     wait_position_advances(&player).await;
 
     player
-        .play(URL_2)
+        .play(URL_2, None)
         .await
         .expect("la segunda pista debe reproducir con la caché");
     let mut second = Vec::new();
@@ -84,7 +84,7 @@ async fn auto_mode_retries_detected_browsers_on_block() {
     let player = Arc::new(player);
 
     let player_task = Arc::clone(&player);
-    let mut play_handle = tokio::spawn(async move { player_task.play(URL_1).await });
+    let mut play_handle = tokio::spawn(async move { player_task.play(URL_1, None).await });
 
     let mut saw_firefox_retry = false;
     for _ in 0..60 {

@@ -8,5 +8,7 @@ pub mod playlists;
 pub mod providers;
 pub mod queue;
 pub mod random;
+pub mod session;
 pub mod state_file;
+pub mod theme;
 pub mod tui;

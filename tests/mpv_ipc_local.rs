@@ -32,7 +32,7 @@ async fn mpv_ipc_local_file_position_advances() {
         .await
         .expect("set_property volume debe aceptarse");
     player
-        .play(fixture.to_str().unwrap())
+        .play(fixture.to_str().unwrap(), None)
         .await
         .expect("loadfile debe aceptarse");
 
@@ -61,4 +61,24 @@ async fn mpv_ipc_local_file_position_advances() {
     assert!(player.status().await.unwrap().paused);
 
     player.stop().await.expect("stop aceptado");
+
+    // Reanudación de sesión: play con start debe dejar la posición cerca del
+    // punto indicado (seek absoluto tras el arranque).
+    player
+        .play(fixture.to_str().unwrap(), Some(Duration::from_secs(15)))
+        .await
+        .expect("play con start debe aceptarse");
+    let mut resumed = false;
+    for _ in 0..10 {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let status = player.status().await.expect("status debe responder");
+        println!("resume pos={:?}", status.position);
+        if let Some(pos) = status.position
+            && pos >= Duration::from_secs(14)
+        {
+            resumed = true;
+            break;
+        }
+    }
+    assert!(resumed, "la posición no reanudó cerca de los 15 s");
 }

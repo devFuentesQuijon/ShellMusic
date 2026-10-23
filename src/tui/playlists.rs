@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph};
 
 use super::fmt_duration;
@@ -34,10 +34,10 @@ pub(super) fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     horizontal
 }
 
-pub(super) fn block(title: String) -> Block<'static> {
+pub(super) fn block(title: String, accent: ratatui::style::Color) -> Block<'static> {
     Block::bordered()
         .title(title)
-        .border_style(Style::new().fg(Color::Cyan))
+        .border_style(Style::new().fg(accent))
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -50,11 +50,11 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
     let list = List::new(items)
-        .block(block("Playlists (P)".to_string()))
+        .block(block("Playlists (P)".to_string(), app.theme.accent))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_list_state);
-    draw_hints(frame, area, "Enter abrir · n nueva · d eliminar (x2) · Esc cerrar");
+    draw_hints(frame, area, "Enter abrir · n nueva · d eliminar (x2) · Esc cerrar", app.theme.muted);
 }
 
 fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
@@ -84,7 +84,7 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
         })
         .collect();
     let list = List::new(items)
-        .block(block(title))
+        .block(block(title, app.theme.accent))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_content_state);
@@ -92,6 +92,7 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
         frame,
         area,
         "Enter reproducir · a cola · A toda · d quitar · J/K mover · Esc volver",
+        app.theme.muted,
     );
 }
 
@@ -100,7 +101,7 @@ fn draw_name_input(frame: &mut Frame, app: &mut App, area: Rect, context: &NameC
         NameContext::Plain => "Nueva playlist".to_string(),
         NameContext::WithTrack(track) => format!("Nueva playlist para: {}", track.title),
     };
-    let input = Paragraph::new(app.overlay_input.as_str()).block(block(title));
+    let input = Paragraph::new(app.overlay_input.as_str()).block(block(title, app.theme.accent));
     frame.render_widget(input, area);
     let cursor_x = area.x + 1 + app.overlay_input.chars().count() as u16;
     frame.set_cursor_position((cursor_x.min(area.x + area.width.saturating_sub(2)), area.y + 1));
@@ -117,14 +118,14 @@ fn draw_pick(frame: &mut Frame, app: &mut App, area: Rect, track: &crate::provid
         .collect();
     items.push(ListItem::new("+ nueva playlist…"));
     let list = List::new(items)
-        .block(block(format!("Añadir a playlist: {}", track.title)))
+        .block(block(format!("Añadir a playlist: {}", track.title), app.theme.accent))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_list_state);
-    draw_hints(frame, area, "Enter elegir · Esc cancelar");
+    draw_hints(frame, area, "Enter elegir · Esc cancelar", app.theme.muted);
 }
 
-fn draw_hints(frame: &mut Frame, area: Rect, hints: &str) {
+fn draw_hints(frame: &mut Frame, area: Rect, hints: &str, muted: ratatui::style::Color) {
     if area.height < 3 {
         return;
     }
@@ -135,7 +136,7 @@ fn draw_hints(frame: &mut Frame, area: Rect, hints: &str) {
         height: 1,
     };
     frame.render_widget(
-        Paragraph::new(hints).style(Style::new().fg(Color::DarkGray)),
+        Paragraph::new(hints).style(Style::new().fg(muted)),
         hint_area,
     );
 }

@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
 use super::fmt_duration;
@@ -15,7 +15,7 @@ pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         format!("Buscar en {provider} (/ para enfocar)")
     };
     let border_style = if focused {
-        Style::new().fg(Color::Cyan)
+        Style::new().fg(app.theme.accent)
     } else {
         Style::default()
     };
@@ -31,7 +31,7 @@ pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 pub fn draw_results(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Browsing;
     let border_style = if focused {
-        Style::new().fg(Color::Cyan)
+        Style::new().fg(app.theme.accent)
     } else {
         Style::default()
     };

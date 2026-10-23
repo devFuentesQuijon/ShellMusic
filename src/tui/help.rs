@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
@@ -69,11 +69,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     for (title, bindings) in SECTIONS {
         lines.push(Line::from(Span::styled(
             *title,
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::new().fg(app.theme.accent).add_modifier(Modifier::BOLD),
         )));
         for (key, action) in *bindings {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {key:<16}", key = key), Style::new().fg(Color::Yellow)),
+                Span::styled(format!("  {key:<16}", key = key), Style::new().fg(app.theme.highlight)),
                 Span::raw(*action),
             ]));
         }
@@ -81,10 +81,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
     lines.push(Line::from(Span::styled(
         "Esc / ? cerrar",
-        Style::new().fg(Color::DarkGray),
+        Style::new().fg(app.theme.muted),
     )));
     frame.render_widget(
-        Paragraph::new(lines).block(block("Ayuda — atajos de teclado".to_string())),
+        Paragraph::new(lines).block(block("Ayuda — atajos de teclado".to_string(), app.theme.accent)),
         area,
     );
 }

@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Gauge};
 
 use super::fmt_duration;
@@ -60,7 +60,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     };
     let gauge = Gauge::default()
         .block(Block::bordered().title("Reproductor"))
-        .gauge_style(Style::new().fg(Color::Green))
+        .gauge_style(Style::new().fg(app.theme.progress))
         .ratio(ratio)
         .label(label);
     frame.render_widget(gauge, area);

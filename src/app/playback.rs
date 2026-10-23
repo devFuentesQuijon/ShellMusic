@@ -164,6 +164,17 @@ pub(super) fn play_queue_track(
     tx: &mpsc::UnboundedSender<AppMsg>,
     index: usize,
 ) {
+    play_queue_track_from(app, player, tx, index, None);
+}
+
+/// Reproduce la pista de la cola; `start` reanuda desde esa posición.
+pub(super) fn play_queue_track_from(
+    app: &mut App,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    index: usize,
+    start: Option<std::time::Duration>,
+) {
     if index >= app.queue.len() {
         return;
     }
@@ -184,11 +195,13 @@ pub(super) fn play_queue_track(
         "cargando «{}»…",
         app.queue.tracks[index].title
     )));
+    // Persiste la cola al cambiar de pista: sobrevive a cierres abruptos.
+    app.save_session(start);
     let url = app.queue.tracks[index].source_url.clone();
     let player = Arc::clone(player);
     let play_tx = tx.clone();
     tokio::spawn(async move {
-        match player.play(&url).await {
+        match player.play(&url, start).await {
             Ok(()) => {
                 let _ = play_tx.send(AppMsg::PlaybackStarted);
             }
@@ -659,7 +672,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Player for MockPlayer {
-        async fn play(&self, _url: &str) -> Result<()> {
+        async fn play(&self, _url: &str, _start: Option<std::time::Duration>) -> Result<()> {
             Ok(())
         }
         async fn toggle_pause(&self) -> Result<()> {

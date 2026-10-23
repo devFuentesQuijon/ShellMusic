@@ -97,6 +97,9 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-26 | `?` abre un overlay modal de ayuda con los atajos por contexto (se cierra con Esc, `?` o Enter); el pie de cada panel apunta a `? ayuda`. | Media |
 | RF-27 | Prefetch de radio: al empezar a sonar la última pista de la cola (radio activa, repetición off) se lanza la expansión en segundo plano y las pistas nuevas se encolan sin interrumpir; al terminar la pista la siguiente entra sin pausa. Si la búsqueda falla o no hay nada nuevo, se reintenta al agotarse la cola (comportamiento clásico). | Alta |
 | RF-28 | Navegación en listas largas: `PageUp`/`PageDown` saltan una página (la altura visible real del panel, fijada por el render) y `g`/`G` van al inicio/fin, en Resultados, Cola, Favoritos y las listas de los overlays de playlists. | Media |
+| RF-29 | Cola persistente entre sesiones: al salir y en cada cambio de pista se guarda `session.json` (pistas, pista en curso y posición) en el dir de datos, con escritura atómica y corrupto → `.bak` + aviso; al arrancar se restaura la cola y se reanuda la pista desde la posición guardada. | Media |
+| RF-30 | Temas de color en `[theme]` de `config.toml` (roles `accent`, `highlight`, `error`, `muted`, `progress`; nombres, `#rrggbb` o índice 0-255); valor inválido → color por defecto con aviso en la línea de estado, sin panic. | Baja |
+| RF-31 | La pestaña del terminal muestra «ShellMusic» en reposo y «♪ artista — título · ShellMusic» durante la reproducción (OSC 2); al salir se restablece el título del terminal. | Baja |
 
 ### Flujo de usuario principal
 
@@ -161,6 +164,8 @@ src/
 ├── favorites.rs       # favoritos locales (persistencia JSON atómica)
 ├── playlists.rs       # playlists locales (persistencia JSON atómica)
 ├── browsers.rs        # detección de navegadores instalados (cookies anti-bot)
+├── session.rs         # cola persistente entre sesiones (persistencia JSON atómica)
+├── theme.rs           # tema de color resuelto desde [theme] de la config
 ├── providers/
 │   ├── mod.rs         # trait MusicProvider + tipos Track + ProviderKind
 │   ├── ytdlp.rs       # helper compartido: búsqueda yt-dlp (ytsearch/scsearch) y parseo
@@ -198,7 +203,7 @@ pub trait MusicProvider: Send + Sync {
 
 #[async_trait]
 pub trait Player: Send + Sync {
-    async fn play(&self, url: &str) -> Result<()>;
+    async fn play(&self, url: &str, start: Option<Duration>) -> Result<()>;  // start: reanudar desde esa posición
     async fn toggle_pause(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
     async fn seek(&self, seconds: i32) -> Result<()>;        // salto relativo en la pista
@@ -282,7 +287,16 @@ ttl_minutes = 15    # 1-120
 [radio]
 enabled = false     # al agotarse la cola, encola pistas relacionadas (se alterna con la tecla r)
 mode = "artista"    # artista | similares | random | random-genero | rarezas (se cicla con R)
+
+[theme]
+accent = "cyan"        # bordes del panel enfocado y títulos de sección
+highlight = "yellow"   # mensajes informativos y teclas en la ayuda
+error = "red"          # mensajes de error
+muted = "darkgray"     # línea de hints y texto secundario
+progress = "green"     # barra de progreso
 ```
+
+Los colores aceptan nombres (`cyan`, `lightred`, `darkgray`…), hex (`#rrggbb`) e índices de paleta (0-255); un valor inválido cae al color por defecto con un aviso en la línea de estado.
 
 Si el archivo no existe al primer arranque, se crea con estos valores.
 
@@ -331,7 +345,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
 | 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |
 | 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") |
-| 14 | Pulido: cola persistente entre sesiones (restaurar cola + pista + posición al arrancar); temas de color configurables en `config.toml` |
+| **14** | Pulido: cola persistente entre sesiones (`session.json`: restaurar cola + pista + posición al arrancar, con reanudación vía `start` de mpv); temas de color configurables en `[theme]` de `config.toml`; título de la pestaña del terminal con la pista en reproducción (OSC 2) — **completada** |
 | **15** | Limpieza de la cola: con el modo radio la cola crece sin límite (~5 pistas por tanda). Al superar 500 pistas (`MAX_QUEUE` en `src/queue.rs`) se podan las ya reproducidas antes de encolar más, conservando las 20 anteriores a la actual (`KEEP_BEFORE_CURRENT`) para la navegación `p`; sin reproducción en curso o con la actual cerca del inicio no se poda — **completada** |
 
 ---

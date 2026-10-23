@@ -44,7 +44,8 @@ pub enum PlayerEvent {
 
 #[async_trait]
 pub trait Player: Send + Sync {
-    async fn play(&self, url: &str) -> Result<()>;
+    /// Reproduce una URL; `start` reanuda desde esa posición (None = inicio).
+    async fn play(&self, url: &str, start: Option<Duration>) -> Result<()>;
     async fn toggle_pause(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
     /// Salto relativo dentro de la pista (segundos, puede ser negativo).

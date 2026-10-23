@@ -12,6 +12,8 @@ use crate::playlists::Playlists;
 use crate::providers::youtube::YoutubeProvider;
 use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::queue::Queue;
+use crate::session::Session;
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -224,6 +226,12 @@ pub struct App {
     pub(super) results_limit: usize,
     favorites_path: std::path::PathBuf,
     playlists_path: std::path::PathBuf,
+    session_path: std::path::PathBuf,
+    /// Tema de color resuelto de `[theme]` en la config.
+    pub theme: Theme,
+    /// Posición desde la que reanudar la pista restaurada; la consume
+    /// `app::run` al arrancar.
+    pub pending_position: Option<std::time::Duration>,
     pub history: History,
     /// Posición al navegar el historial con ↑/↓; None = editando texto nuevo.
     history_index: Option<usize>,
@@ -245,12 +253,16 @@ impl App {
         let favorites_path = data_dir.join("favorites.json");
         let playlists_path = data_dir.join("playlists.json");
         let history_path = data_dir.join("history.json");
+        let session_path = data_dir.join("session.json");
         let (favorites, fav_warning) = Favorites::load(&favorites_path)
             .with_context(|| format!("no se pudieron leer {}", favorites_path.display()))?;
         let (playlists, pl_warning) = Playlists::load(&playlists_path)
             .with_context(|| format!("no se pudieron leer {}", playlists_path.display()))?;
         let (history, hist_warning) = History::load(&history_path)
             .with_context(|| format!("no se pudo leer {}", history_path.display()))?;
+        let (session, sess_warning) = Session::load(&session_path)
+            .with_context(|| format!("no se pudo leer {}", session_path.display()))?;
+        let (theme, theme_warning) = Theme::resolve(&config.theme);
         let mut app = Self {
             focus: Focus::Searching,
             input: String::new(),
@@ -272,7 +284,12 @@ impl App {
                 volume: config.audio.initial_volume,
                 ..PlaybackStatus::default()
             },
-            message: fav_warning.or(pl_warning).or(hist_warning).map(Message::error),
+            message: fav_warning
+                .or(pl_warning)
+                .or(hist_warning)
+                .or(sess_warning)
+                .or(theme_warning)
+                .map(Message::error),
             searching: false,
             should_quit: false,
             providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
@@ -288,6 +305,9 @@ impl App {
             results_limit: config.general.results_per_search,
             favorites_path,
             playlists_path,
+            session_path,
+            theme,
+            pending_position: session.position,
             history,
             history_index: None,
             history_draft: String::new(),
@@ -295,6 +315,15 @@ impl App {
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
+        }
+        // Cola persistente: restaura pistas y la que sonaba (con su posición,
+        // que `app::run` consumirá para reanudarla).
+        app.queue.tracks = session.tracks;
+        app.queue.current = session.current;
+        if let Some(current) = session.current {
+            app.queue_select(current);
+        } else if !app.queue.is_empty() {
+            app.queue_select(0);
         }
         Ok(app)
     }
@@ -379,6 +408,21 @@ impl App {
         if let Err(err) = self.favorites.save(&self.favorites_path) {
             self.message = Some(Message::error(format!(
                 "no se pudieron guardar los favoritos: {err}"
+            )));
+        }
+    }
+
+    /// Persiste la cola actual (pistas, pista en curso y `position`) para
+    /// restaurarla en el próximo arranque.
+    pub fn save_session(&mut self, position: Option<std::time::Duration>) {
+        let session = Session {
+            tracks: self.queue.tracks.clone(),
+            current: self.queue.current,
+            position,
+        };
+        if let Err(err) = session.save(&self.session_path) {
+            self.message = Some(Message::error(format!(
+                "no se pudo guardar la sesión: {err}"
             )));
         }
     }

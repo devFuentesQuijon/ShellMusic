@@ -18,6 +18,9 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 
 - **Busca y reproduce** YouTube Music y SoundCloud sin abrir el navegador (`m` cambia de proveedor en caliente).
 - **Cola gestionable**: añade, quita, reordena (`J`/`K`), baraja (`S`) y recorre listas largas por página (`PgUp`/`PgDn`) o al salto (`g`/`G`).
+- **Cola persistente**: al cerrar y reabrir, la cola, la pista y la posición se reanudan donde lo dejaste.
+- **Temas de color** configurables en `config.toml` (nombres, `#rrggbb` o índices de paleta).
+- **Título de la pestaña** con la pista en reproducción (`♪ artista — título · ShellMusic`).
 - **Modo radio** con cinco sub-modos (artista, similares, random, random género, rarezas): la siguiente tanda se busca mientras suena la última pista y entra sin pausa.
 - **Repetición** off / toda la cola / pista actual (`l`) y **seek** de ±5 s o ±30 s (`←`/`→`).
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube.
@@ -127,6 +130,24 @@ El panel derecho muestra la cola: posición, título, artista y duración, con `
 
 - Al terminar una pista de forma natural, avanza automáticamente a la siguiente de la cola (autoplay). `s` (stop) no dispara autoplay.
 - Si eliminas con `d` la pista que está sonando, se reproduce la que ocupa su lugar; si era la última, se detiene.
+- La cola es persistente: se guarda en `session.json` junto a `favorites.json` al cambiar de pista y al salir, y al arrancar se restaura la cola y se reanuda la pista desde la posición en la que estaba.
+
+## Título de la pestaña y temas
+
+La pestaña del terminal muestra «ShellMusic» en reposo y «♪ artista — título · ShellMusic» mientras suena una pista; al salir se restablece el título habitual del terminal.
+
+Los colores de la interfaz se configuran en la sección `[theme]` de `config.toml`:
+
+```toml
+[theme]
+accent = "cyan"        # bordes del panel enfocado y títulos de sección
+highlight = "yellow"   # mensajes informativos y teclas en la ayuda
+error = "red"          # mensajes de error
+muted = "darkgray"     # línea de hints y texto secundario
+progress = "green"     # barra de progreso
+```
+
+Acepta nombres (`cyan`, `lightred`, `darkgray`…), hex (`#rrggbb`) e índices de paleta (0-255); un valor inválido usa el color por defecto y avisa en la línea de estado.
 
 ## Repetición y orden aleatorio
 
@@ -162,6 +183,9 @@ ttl_minutes = 15    # 1-120
 
 [radio]
 enabled = false     # modo radio activo al arrancar (se alterna con la tecla r)
+
+[theme]
+accent = "cyan"        # colores de la interfaz; ver «Título de la pestaña y temas»
 ```
 
 Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.

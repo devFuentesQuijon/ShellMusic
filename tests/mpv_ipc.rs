@@ -17,7 +17,7 @@ async fn mpv_plays_youtube_track_and_position_advances() {
     let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, &["--ao=null"])
         .await
         .expect("mpv debe lanzarse y aceptar IPC");
-    player.play(url).await.expect("loadfile debe aceptarse");
+    player.play(url, None).await.expect("loadfile debe aceptarse");
 
     let mut last_position: Option<Duration> = None;
     let mut advanced = false;
@@ -51,7 +51,7 @@ async fn mpv_reports_stderr_detail_on_failure() {
         .await
         .expect("mpv debe lanzarse");
     let err = player
-        .play("https://www.youtube.com/watch?v=VIDEO_INEXISTENTE")
+        .play("https://www.youtube.com/watch?v=VIDEO_INEXISTENTE", None)
         .await
         .expect_err("un vídeo inexistente debe fallar");
     let message = err.to_string();

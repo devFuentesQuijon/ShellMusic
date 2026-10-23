@@ -127,6 +127,10 @@ struct Shared {
     next_id: u64,
     stderr_tail: VecDeque<String>,
     outcome_tx: Option<oneshot::Sender<Result<(), String>>>,
+    /// Entrada de playlist del `loadfile` en vuelo: los `end-file` de la
+    /// entrada anterior (p. ej. un `stop` previo) no deben resolver la
+    /// espera de la nueva carga.
+    pending_entry: Option<i64>,
 }
 
 pub struct MpvPlayer {
@@ -293,31 +297,57 @@ impl MpvPlayer {
         Ok(())
     }
 
-    async fn try_play(&self, url: &str) -> Result<(), String> {
+    async fn try_play(&self, url: &str, start: Option<Duration>) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
         {
             let mut shared = lock(&self.shared);
             shared.stderr_tail.clear();
             shared.outcome_tx = Some(tx);
+            // Centinela: la espera queda armada pero aún no se vio el
+            // start-file de esta carga; un end-file rezagado de la entrada
+            // anterior (p. ej. de un stop previo) no debe resolverla.
+            shared.pending_entry = Some(-1);
         }
+        // mpv 0.37 no admite opciones por archivo en `loadfile` (llegaron en
+        // 0.38), así que la reanudación de sesión se hace con un seek
+        // absoluto en cuanto arranca la reproducción.
         self.command(vec!["loadfile".into(), url.into()])
             .await
             .map_err(|err| err.to_string())?;
-        match tokio::time::timeout(PLAY_TIMEOUT, rx).await {
+        let result = match tokio::time::timeout(PLAY_TIMEOUT, rx).await {
             Ok(Ok(result)) => result,
             // El emisor se descartó: otro play() tomó el relevo.
             Ok(Err(_)) => Ok(()),
             Err(_) => {
-                lock(&self.shared).outcome_tx = None;
+                let mut shared = lock(&self.shared);
+                shared.outcome_tx = None;
+                shared.pending_entry = None;
                 Err("tiempo de espera agotado al cargar el stream".to_string())
             }
+        };
+        if result.is_ok()
+            && let Some(start) = start
+            && start > Duration::ZERO
+            && let Err(err) = self
+                .command(vec![
+                    "set_property".into(),
+                    "time-pos".into(),
+                    start.as_secs_f64().into(),
+                ])
+                .await
+        {
+            // La pista ya suena: un fallo al reanudar la posición solo se avisa.
+            let _ = self.notify.send(PlayerEvent::Notice(PlayerNotice::info(
+                format!("no se pudo reanudar la posición guardada: {err}"),
+            )));
         }
+        result
     }
 }
 
 #[async_trait]
 impl Player for MpvPlayer {
-    async fn play(&self, url: &str) -> Result<()> {
+    async fn play(&self, url: &str, start: Option<Duration>) -> Result<()> {
         let attempts = self.attempt_plan();
         let mut last_error = String::new();
         let mut blocked = false;
@@ -329,7 +359,7 @@ impl Player for MpvPlayer {
                     attempt.label()
                 ))));
             }
-            match self.try_play(url).await {
+            match self.try_play(url, start).await {
                 Ok(()) => {
                     if self.cookies_mode == CookiesMode::Auto {
                         *lock(&self.cached_attempt) = Some(attempt.clone());
@@ -553,17 +583,44 @@ fn handle_message(
                 _ => {}
             }
         }
+        Some("start-file") => {
+            // Marca qué entrada está cargando la espera actual: un end-file
+            // rezagado de la entrada anterior (p. ej. de un stop) llega antes
+            // que este start-file y no debe resolver la espera.
+            let entry = value.get("playlist_entry_id").and_then(Value::as_i64);
+            let mut shared = lock(shared);
+            if shared.outcome_tx.is_some() {
+                shared.pending_entry = entry;
+            }
+        }
         Some("playback-restart") => {
-            let outcome = lock(shared).outcome_tx.take();
+            let mut shared = lock(shared);
+            shared.pending_entry = None;
+            let outcome = shared.outcome_tx.take();
+            drop(shared);
             if let Some(outcome) = outcome {
                 let _ = outcome.send(Ok(()));
             }
         }
         Some("end-file") => {
             let reason = value.get("reason").and_then(Value::as_str).unwrap_or("");
+            let entry = value.get("playlist_entry_id").and_then(Value::as_i64);
+            let outcome = {
+                let mut shared = lock(shared);
+                // Con espera armada solo la resuelve el end-file de la
+                // entrada que empezó a cargar (start-file fija pending_entry);
+                // uno rezagado de la entrada anterior se ignora.
+                match (shared.outcome_tx.is_some(), shared.pending_entry, entry) {
+                    (true, Some(pending), e) if e != Some(pending) => None,
+                    (true, _, _) => {
+                        shared.pending_entry = None;
+                        shared.outcome_tx.take()
+                    }
+                    (false, _, _) => None,
+                }
+            };
             if reason != "error" {
                 // stop/eof con una carga en espera: se considera resuelta.
-                let outcome = lock(shared).outcome_tx.take();
                 if let Some(outcome) = outcome {
                     let _ = outcome.send(Ok(()));
                 } else if reason == "eof" {
@@ -587,7 +644,6 @@ fn handle_message(
                     (None, "") => "desconocido".to_string(),
                     (None, detail) => detail.to_string(),
                 };
-                let outcome = lock(shared).outcome_tx.take();
                 match outcome {
                     Some(outcome) => {
                         let _ = outcome.send(Err(message));

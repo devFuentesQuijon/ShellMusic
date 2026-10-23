@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 
 use crate::app::{App, Focus, Overlay};
@@ -52,8 +52,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
 fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (text, style) = match &app.message {
-        Some(msg) if msg.is_error => (msg.text.clone(), Style::new().fg(Color::Red)),
-        Some(msg) => (msg.text.clone(), Style::new().fg(Color::Yellow)),
+        Some(msg) if msg.is_error => (msg.text.clone(), Style::new().fg(app.theme.error)),
+        Some(msg) => (msg.text.clone(), Style::new().fg(app.theme.highlight)),
         None => (
             match app.overlay {
                 Overlay::Closed => match app.focus {
@@ -66,7 +66,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 _ => "playlists: las teclas se muestran dentro del panel",
             }
             .to_string(),
-            Style::new().fg(Color::DarkGray),
+            Style::new().fg(app.theme.muted),
         ),
     };
     frame.render_widget(Paragraph::new(text).style(style), area);
