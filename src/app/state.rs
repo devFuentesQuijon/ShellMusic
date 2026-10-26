@@ -245,6 +245,9 @@ pub struct App {
     /// true mientras hay reproducción en curso; RadioDone solo auto-reproduce
     /// si el reproductor está parado (cola agotada), no en prefetch.
     pub playback_active: bool,
+    /// Invalida resultados de búsqueda rezagados: cada submit_search lo
+    /// incrementa y captura el suyo; SearchDone solo aplica si coincide.
+    pub search_epoch: u64,
     pub(super) results_limit: usize,
     favorites_path: std::path::PathBuf,
     playlists_path: std::path::PathBuf,
@@ -281,6 +284,11 @@ pub struct App {
     pub cover: Option<ratatui_image::protocol::StatefulProtocol>,
     /// Pista (provider, id) de la carátula cacheada.
     pub cover_for: Option<(ProviderKind, String)>,
+    /// Último guardado periódico de sesión/estadísticas (acota la pérdida
+    /// ante un kill -9 a ~30 s).
+    pub last_periodic_save: Option<std::time::Instant>,
+    /// Hay conteos de estadísticas sin persistir desde el último save.
+    pub stats_dirty: bool,
 }
 
 impl App {
@@ -346,6 +354,7 @@ impl App {
             played: HashSet::new(),
             played_titles: HashSet::new(),
             radio_epoch: 0,
+            search_epoch: 0,
             radio_expanded_for: None,
             playback_active: false,
             results_limit: config.general.results_per_search,
@@ -369,6 +378,8 @@ impl App {
             picker: None,
             cover: None,
             cover_for: None,
+            last_periodic_save: None,
+            stats_dirty: false,
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));

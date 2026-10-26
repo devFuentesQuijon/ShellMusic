@@ -32,6 +32,12 @@ pub(crate) fn unique_tmp_path(path: &Path) -> PathBuf {
 /// Lock de archivo vía creación exclusiva (O_EXCL). Coordina la sección
 /// crítica comprobar-huella → fusionar → escribir → renombrar entre
 /// instancias de la app. Se libera al hacer drop.
+///
+/// Anti-stale: si un proceso muere (`kill -9`) mientras escribe, el lock
+/// queda huérfano y bloquearía todos los guardados futuros. Al encontrarlo,
+/// se comprueba si el proceso dueño sigue vivo y la antigüedad del archivo:
+/// si el dueño murió o el lock lleva más de 5 min, se considera huérfano y
+/// se reemplaza.
 #[derive(Debug)]
 pub(crate) struct SaveLock {
     lock_path: PathBuf,
@@ -46,8 +52,19 @@ impl SaveLock {
         let mut attempts = 0;
         loop {
             match fs::File::create_new(&lock_path) {
-                Ok(_) => return Ok(Self { lock_path }),
+                Ok(mut file) => {
+                    // El PID del dueño viaja dentro del lock para poder
+                    // detectar locks huérfanos de procesos matados.
+                    use std::io::Write;
+                    let _ = writeln!(file, "{}", std::process::id());
+                    return Ok(Self { lock_path });
+                }
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                    if is_stale_lock(&lock_path) {
+                        // Lock huérfano: el dueño murió o es demasiado viejo.
+                        let _ = fs::remove_file(&lock_path);
+                        continue;
+                    }
                     attempts += 1;
                     if attempts >= LOCK_RETRIES {
                         return Err(io::Error::new(
@@ -64,6 +81,60 @@ impl SaveLock {
             }
         }
     }
+}
+
+/// Un lock es huérfano si su dueño ya no existe o si lleva demasiado tiempo
+/// (el guardado real nunca dura minutos; uno tan vieño es de un proceso
+/// matado). El PID del dueño viaja dentro del lock.
+fn is_stale_lock(lock_path: &Path) -> bool {
+    const MAX_LOCK_AGE: Duration = Duration::from_secs(300);
+    let Ok(metadata) = fs::metadata(lock_path) else {
+        return true;
+    };
+    if let Ok(age) = metadata.modified().and_then(|m| {
+        m.elapsed()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, ""))
+    })
+        && age > MAX_LOCK_AGE
+    {
+        return true;
+    }
+    owner_alive(lock_path)
+        .map(|alive| !alive)
+        .unwrap_or(false)
+}
+
+/// Lee el PID del dueño del lock y comprueba si el proceso sigue vivo.
+fn owner_alive(lock_path: &Path) -> Option<bool> {
+    let content = fs::read_to_string(lock_path).ok()?;
+    let pid: u32 = content.trim().parse().ok()?;
+    process_alive(pid)
+}
+
+#[cfg(unix)]
+fn process_alive(pid: u32) -> Option<bool> {
+    // kill(pid, 0): 0 = vivo, ESRCH = muerto.
+    let result = unsafe { libc_kill(pid as i32, 0) };
+    if result == 0 {
+        Some(true)
+    } else {
+        Some(std::io::Error::last_os_error().raw_os_error() != Some(3)) // ESRCH=3: no existe
+    }
+}
+
+#[cfg(not(unix))]
+fn process_alive(_pid: u32) -> Option<bool> {
+    // Sin una forma portable barata de consultar PIDs ajenos: solo la edad
+    // del lock decide (cubierto por MAX_LOCK_AGE).
+    None
+}
+
+#[cfg(unix)]
+unsafe fn libc_kill(pid: i32, sig: i32) -> i32 {
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe { kill(pid, sig) }
 }
 
 impl Drop for SaveLock {
@@ -112,5 +183,27 @@ mod tests {
     fn unique_tmp_paths_differ() {
         let path = Path::new("favorites.json");
         assert_ne!(unique_tmp_path(path), unique_tmp_path(path));
+    }
+
+    #[test]
+    fn stale_lock_from_dead_process_is_replaced() {
+        let dir = std::env::temp_dir().join(format!("shellmusic-lock-stale-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let data = dir.join("state.json");
+        // Simular un lock huérfano: PID imposible de un proceso muerto.
+        let lock_path = data.with_extension("json.lock");
+        fs::write(&lock_path, "999999999").unwrap();
+        let _guard = SaveLock::acquire(&data).expect("el lock huérfano se reemplaza");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_lock_is_not_stale() {
+        let dir = std::env::temp_dir().join(format!("shellmusic-lock-live-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let data = dir.join("state.json");
+        let _guard = SaveLock::acquire(&data).unwrap();
+        assert!(!is_stale_lock(&data.with_extension("json.lock")));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

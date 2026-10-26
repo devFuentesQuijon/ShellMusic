@@ -25,6 +25,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Repetición** off / toda la cola / pista actual (`l`) y **seek** de ±5 s o ±30 s (`←`/`→`).
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube.
 - **Historial de búsquedas** navegable con `↑`/`↓`, como en un shell.
+- **Robusta**: si mpv muere en marcha se reinicia solo, la sesión sobrevive a un `kill -9` (pérdida máxima 30 s), las búsquedas reintentan fallos transitorios y los resultados rezagados no se cuelan.
 - **Estadísticas de escucha** (`t`): tus pistas y artistas más escuchados, con reproducción directa desde el ranking.
 - **Portabilidad** (`X`/`I`): exporta playlists y favoritos a JSON o M3U e impórtalos en otro equipo.
 - **Integración con el sistema**: notificación de escritorio al cambiar de pista y, en Linux, MPRIS (teclas multimedia, widgets del escritorio, KDE Connect).

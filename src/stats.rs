@@ -1,6 +1,7 @@
 //! Estadísticas locales de escucha: conteo de reproducciones por pista y
 //! artistas más oídos, persistidas en `stats.json`.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -44,6 +45,43 @@ impl StatsEntry {
 struct StatsFile {
     version: u32,
     entries: Vec<StatsEntry>,
+}
+
+/// Normaliza un nombre de artista para agrupar estadísticas: quita los
+/// sufijos que YouTube añade a los canales oficiales («Daft Punk - Topic»,
+/// «VEVO», «Official»…), los segmentos «feat. …» y colapsa espacios, en
+/// minúsculas. Solo clave de agrupación: no muta datos persistidos.
+fn canonical_artist(artist: &str) -> String {
+    let mut name = artist.trim().to_string();
+    for suffix in [" - Topic", " (Topic)", " -Topic", " [Topic]"] {
+        if let Some(stripped) = name.strip_suffix(suffix) {
+            name = stripped.to_string();
+        }
+    }
+    for marker in [" - VEVO", " (VEVO)", " [VEVO]", " VEVO", " - Official", " (Official)"] {
+        name = name.replace(marker, "");
+    }
+    // «AdeleVEVO», «...VEVO» pegado al nombre: sufijo case-insensitive.
+    if name.to_uppercase().ends_with("VEVO") && name.len() > 4 {
+        let cut = name.len() - 4;
+        name.truncate(cut);
+    }
+    // Quitar segmentos de colaboración: «Artist feat. X», «Artist ft. X».
+    let lower = name.to_lowercase();
+    let cut = [" feat.", " ft.", " featuring "]
+        .iter()
+        .filter_map(|m| lower.find(m))
+        .min();
+    if let Some(pos) = cut {
+        name.truncate(pos);
+    }
+    name.chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Artista con sus reproducciones acumuladas (vista derivada).
@@ -163,18 +201,38 @@ impl Stats {
         sorted.into_iter().map(|e| (e, e.to_track())).collect()
     }
 
-    /// Artistas ordenados por reproducciones acumuladas.
+    /// Artistas ordenados por reproducciones acumuladas. Los nombres se
+    /// agrupan por forma canónica («Daft Punk - Topic» = «Daft Punk») y se
+    /// muestra la forma original más frecuente.
     pub fn top_artists(&self) -> Vec<ArtistCount> {
-        let mut counts: Vec<ArtistCount> = Vec::new();
+        let mut groups: Vec<(String, u64, HashMap<String, u64>)> = Vec::new();
         for entry in &self.entries {
-            match counts.iter_mut().find(|c| c.artist == entry.artist) {
-                Some(count) => count.plays += entry.plays,
-                None => counts.push(ArtistCount {
-                    artist: entry.artist.clone(),
-                    plays: entry.plays,
-                }),
+            let key = canonical_artist(&entry.artist);
+            match groups.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, plays, forms)) => {
+                    *plays += entry.plays;
+                    *forms.entry(entry.artist.clone()).or_default() += entry.plays;
+                }
+                None => {
+                    let mut forms = HashMap::new();
+                    forms.insert(entry.artist.clone(), entry.plays);
+                    groups.push((key, entry.plays, forms));
+                }
             }
         }
+        let mut counts: Vec<ArtistCount> = groups
+            .into_iter()
+            .map(|(_, plays, forms)| {
+                let display = forms
+                    .into_iter()
+                    .max_by_key(|(_, plays)| *plays)
+                    .map_or_else(|| "Desconocido".to_string(), |(name, _)| name);
+                ArtistCount {
+                    artist: display,
+                    plays,
+                }
+            })
+            .collect();
         counts.sort_by(|a, b| b.plays.cmp(&a.plays).then(a.artist.cmp(&b.artist)));
         counts
     }
@@ -229,6 +287,34 @@ mod tests {
         assert_eq!(artists[0].artist, "y");
         assert_eq!(artists[0].plays, 3);
         assert_eq!(artists[1].artist, "x");
+    }
+
+    #[test]
+    fn top_artists_unifies_topic_and_official_suffixes() {
+        let mut stats = Stats::default();
+        stats.record(&track("a", "Daft Punk"));
+        stats.record(&track("a2", "Daft Punk"));
+        stats.record(&track("b", "Daft Punk - Topic"));
+        stats.record(&track("c", "daft punk"));
+        stats.record(&track("d", "Artist X feat. Someone"));
+        stats.record(&track("e", "Artist X"));
+        let artists = stats.top_artists();
+        assert_eq!(artists.len(), 2, "las variantes de Daft Punk se unifican");
+        assert_eq!(artists[0].plays, 4);
+        assert_eq!(artists[1].plays, 2);
+        // El display usa la forma más frecuente original.
+        assert_eq!(artists[0].artist, "Daft Punk");
+    }
+
+    #[test]
+    fn canonical_artist_strips_channel_suffixes_and_features() {
+        assert_eq!(super::canonical_artist("Daft Punk - Topic"), "daft punk");
+        assert_eq!(super::canonical_artist("Daft Punk (Topic)"), "daft punk");
+        assert_eq!(super::canonical_artist("AdeleVEVO"), "adele");
+        assert_eq!(super::canonical_artist("Adele - VEVO"), "adele");
+        assert_eq!(super::canonical_artist("Artist X feat. Y"), "artist x");
+        assert_eq!(super::canonical_artist("Artist X ft. Y"), "artist x");
+        assert_eq!(super::canonical_artist("  Some   Artist  "), "some artist");
     }
 
     #[test]

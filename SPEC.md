@@ -112,8 +112,16 @@ La reproducción con red (streams de YouTube/SoundCloud) no es verificable en CI
 | RF-39 | Ante bloqueo anti-bot, la reproducción rota la combinación `player_client` × cookies: el cliente configurado primero, luego la cadena interna `ios`/`tv`/`web_embedded`, cada uno con su ronda de cookies; la combinación ganadora se cachea en memoria durante la sesión y, si deja de funcionar, se descarta y se recorre el plan completo de nuevo. | Alta |
 | RF-40 | Si el plugin bgutil PO Token de yt-dlp está instalado (paquete pip o carpeta de plugins), con `[youtube] pot_provider = "auto"` se prueba primero el cliente por defecto de yt-dlp (el plugin suele dar mejores streams que forzar `android`); `"off"` lo ignora. El mensaje de bloqueo final sugiere instalarlo. | Media |
 | RF-41 | Al arrancar, si `yt-dlp --version` tiene más de 90 días se muestra un aviso persistente en la línea de estado sugiriendo actualizarlo (los parches anti-bot llegan vía releases de yt-dlp); el arranque no se interrumpe y un formato irreconocible no avisa. | Media |
+| RF-42 | Si el proceso mpv muere en marcha, la app lo respawnea sola con el volumen vigente (máx. 3 respawns en 60 s, con guarda anti-bucle y aviso «mpv se cerró; reiniciándolo…» en la línea de estado). | Alta |
+| RF-43 | Los resultados de búsqueda llevan epoch: una búsqueda lanzada antes de otra no puede sobrescribir los resultados de la más reciente cuando llega tarde. | Media |
+| RF-44 | Los fallos transitorios de yt-dlp (timeout, 502) se reintentan una vez tras 1,5 s antes de propagar el error a la UI. | Media |
+| RF-45 | La sesión (cola + pista + posición) y las estadísticas pendientes se guardan periódicamente cada ~30 s durante la reproducción: un `kill -9` pierde como máximo 30 s. | Media |
+| RF-46 | Los locks de guardado detectan huérfanos: si el proceso dueño murió (PID inexistente) o el lock lleva más de 5 min, se reemplaza en lugar de bloquear todos los guardados futuros. | Alta |
+| RF-47 | Las estadísticas agrupan artistas por forma canónica offline («Daft Punk - Topic», «VEVO», «feat.»… se unifican), mostrando la forma original más frecuente; no muta datos persistidos. | Baja |
 
 Nota sobre la YouTube Data API v3 (evaluada y descartada): no proporciona URLs de stream (la reproducción seguiría dependiendo de yt-dlp), exige que cada usuario cree un proyecto en Google Cloud con su API key (misma fricción que llevó a posponer Spotify en la fase 5) y limita la búsqueda a 100 llamadas/día por proyecto. No aporta robustez al problema real.
+
+Nota sobre MusicBrainz (evaluado y descartado): aportaría identidad canónica de canción/artista, pero su rate limit de 1 petición/segundo lo hace inviable en el path crítico, el matching difuso reintroduce fragilidad y la deduplicación por proveedor es intencional (dos subidas son dos tracks). La normalización offline de artistas en estadísticas (quitar «- Topic», «VEVO», «feat.») cubre el dolor real sin red.
 
 ### Flujo de usuario principal
 
@@ -384,6 +392,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **14** | Pulido: cola persistente entre sesiones (`session.json`: restaurar cola + pista + posición al arrancar, con reanudación vía `start` de mpv); temas de color configurables en `[theme]` de `config.toml`; título de la pestaña del terminal con la pista en reproducción (OSC 2) — **completada** |
 | **15** | Limpieza de la cola: con el modo radio la cola crece sin límite (~5 pistas por tanda). Al superar 500 pistas (`MAX_QUEUE` en `src/queue.rs`) se podan las ya reproducidas antes de encolar más, conservando las 20 anteriores a la actual (`KEEP_BEFORE_CURRENT`) para la navegación `p`; sin reproducción en curso o con la actual cerca del inicio no se poda — **completada** |
 | **16** | Robustez anti-bot de reproducción (tras evaluar y descartar la YouTube Data API v3: no da URLs de stream y exige API key por usuario): rotación de `player_client` × cookies con caché de la combinación ganadora y reintento del plan completo si caduca; detección del plugin bgutil PO Token (`[youtube] pot_provider`); aviso al arrancar si yt-dlp tiene más de 90 días — **completada** |
+| **17** | Robustez operativa: auto-respawn de mpv si muere; epoch de búsqueda (resultados rezagados no sobrescriben); reintento con backoff en yt-dlp; sesión y estadísticas guardadas periódicamente (resistencia a kill -9); SaveLock anti-stale (huérfanos por PID muerto o edad); normalización offline de artistas en estadísticas (MusicBrainz evaluado y descartado: rate limit 1 req/s en el path crítico) — **completada** |
 
 ---
 

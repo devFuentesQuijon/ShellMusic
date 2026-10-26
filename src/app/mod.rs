@@ -23,11 +23,16 @@ pub use state::{App, Focus, Message, NameContext, Overlay, PathAction, RadioMode
 use input::handle_key;
 use playback::{autoplay_next, handle_msg, play_queue_track_from};
 
+// Reproductor intercambiable: si mpv muere en marcha se respawnea con
+// el volumen vigente. Guarda anti-bucle: máx. 3 respawns en 60 s.
+type RespawnResult = Result<(Arc<dyn Player>, mpsc::UnboundedReceiver<PlayerEvent>), String>;
+type RespawnRx = mpsc::UnboundedReceiver<RespawnResult>;
+
 const TICK: Duration = Duration::from_millis(500);
 const APP_TITLE: &str = "ShellMusic";
 
 pub(super) enum AppMsg {
-    SearchDone(Result<Vec<Track>, String>),
+    SearchDone(u64, Result<Vec<Track>, String>),
     Error(String),
     PlaybackStarted,
     RadioDone(String, Result<Vec<Track>, String>, u64),
@@ -64,6 +69,14 @@ pub async fn run(
     let (tx, mut rx) = mpsc::unbounded_channel::<AppMsg>();
     let mut keys = EventStream::new();
 
+    // Reproductor intercambiable: si mpv muere en marcha se respawnea con
+    // el volumen vigente. Guarda anti-bucle: máx. 3 respawns en 60 s.
+    let youtube = config.youtube.clone();
+    let mut player = player;
+    let mut respawn_times: Vec<std::time::Instant> = Vec::new();
+    let mut respawn_rx: Option<RespawnRx> = None;
+    let mut player_respawning = false;
+
     // Integración con el SO: MPRIS/media controls (Linux) y notificaciones.
     let (media_tx, mut media_rx) = mpsc::unbounded_channel::<MediaCommand>();
     let mut system = SystemIntegration::new(&config.integrations, media_tx);
@@ -99,7 +112,10 @@ pub async fn run(
                 }
             }
             _ = tick => {
-                if let Ok(status) = player.status().await {
+                periodic_save(&mut app);
+                if !player_respawning
+                    && let Ok(status) = player.status().await
+                {
                     app.status = status;
                 }
             }
@@ -112,7 +128,39 @@ pub async fn run(
                     app.message = Some(Message { text, is_error });
                 }
                 PlayerEvent::TrackEnded => autoplay_next(&mut app, &player, &tx),
+                PlayerEvent::Died => {
+                    if !player_respawning {
+                        respawn_times.retain(|t| t.elapsed() < Duration::from_secs(60));
+                        if respawn_times.len() >= 3 {
+                            app.message = Some(Message::error(
+                                "mpv no arranca tras varios intentos; reinicia la app",
+                            ));
+                        } else {
+                            respawn_times.push(std::time::Instant::now());
+                            player_respawning = true;
+                            app.message = Some(Message::info("mpv se cerró; reiniciándolo…"));
+                            respawn_player(&mut respawn_rx, &youtube, app.status.volume);
+                        }
+                    }
+                }
             },
+            // El respawn de mpv no es instantáneo: no puede vivir dentro del
+            // select! (tokio::spawn devuelve JoinHandle, no un receiver).
+            // La tarea comunica el resultado por su propio canal.
+            Some(result) = async { match respawn_rx.as_mut() { Some(rx) => rx.recv().await, None => std::future::pending().await } } => {
+                player_respawning = false;
+                respawn_rx = None;
+                match result {
+                    Ok((new_player, new_events)) => {
+                        player = new_player;
+                        player_events = new_events;
+                        app.message = Some(Message::info("mpv reiniciado"));
+                    }
+                    Err(err) => {
+                        app.message = Some(Message::error(format!("no se pudo reiniciar mpv: {err}")));
+                    }
+                }
+            }
         }
         set_tab_title(&desired_title(&app), &mut last_title);
         system.update(&app);
@@ -123,6 +171,43 @@ pub async fn run(
     app.save_session(app.status.position);
     set_tab_title("", &mut last_title);
     Ok(())
+}
+
+/// Lanza el respawn de mpv en segundo plano; el resultado llega por el canal.
+fn respawn_player(
+    respawn_rx: &mut Option<RespawnRx>,
+    youtube: &crate::config::Youtube,
+    volume: u8,
+) {
+    let youtube = youtube.clone();
+    let (done_tx, done_rx) = mpsc::unbounded_channel();
+    *respawn_rx = Some(done_rx);
+    tokio::spawn(async move {
+        let result = crate::player::mpv::MpvPlayer::spawn(volume, &youtube)
+            .await
+            .map(|(player, events)| (Arc::new(player) as Arc<dyn Player>, events))
+            .map_err(|err| err.to_string());
+        let _ = done_tx.send(result);
+    });
+}
+
+/// Guardado periódico de la sesión (posición) y de estadísticas pendientes:
+/// acota la pérdida ante un kill -9 a ~30 s en lugar de al último cambio de
+/// pista. El guardado propiamente dicho se hace en el tick, aquí solo se
+/// decide cuándo.
+fn periodic_save(app: &mut App) {
+    let now = std::time::Instant::now();
+    let due = app
+        .last_periodic_save
+        .is_none_or(|t| t.elapsed() >= Duration::from_secs(30));
+    if due && app.playback_active {
+        app.last_periodic_save = Some(now);
+        app.save_session(app.status.position);
+        if app.stats_dirty {
+            app.save_stats();
+            app.stats_dirty = false;
+        }
+    }
 }
 
 /// Ejecuta un comando de los media controls del SO (MPRIS en Linux).

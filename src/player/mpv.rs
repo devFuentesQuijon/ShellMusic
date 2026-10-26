@@ -667,7 +667,8 @@ async fn reader_task<R>(
         match lines.next_line().await {
             Ok(Some(line)) => handle_message(&line, &shared, &notify),
             Ok(None) => {
-                let _ = notify.send(PlayerEvent::Notice(PlayerNotice::error("mpv se cerró inesperadamente")));
+                // EOF: la conexión IPC se cerró porque mpv terminó en marcha.
+                let _ = notify.send(PlayerEvent::Died);
                 break;
             }
             Err(_) => break,

@@ -40,6 +40,9 @@ pub enum PlayerEvent {
     Notice(PlayerNotice),
     /// La pista terminó de forma natural (end-file con reason "eof").
     TrackEnded,
+    /// El proceso mpv terminó inesperadamente (conexión IPC cerrada en
+    /// marcha): la app puede respawnearlo.
+    Died,
 }
 
 #[async_trait]

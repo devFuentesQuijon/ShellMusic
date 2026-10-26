@@ -18,7 +18,11 @@ pub(super) fn handle_msg(
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
     match msg {
-        AppMsg::SearchDone(Ok(tracks)) => {
+        AppMsg::SearchDone(epoch, Ok(tracks)) => {
+            // Resultado de una búsqueda anterior: no sobrescribe la actual.
+            if epoch != app.search_epoch {
+                return;
+            }
             app.searching = false;
             if tracks.is_empty() {
                 app.message = Some(Message::info("sin resultados"));
@@ -29,7 +33,10 @@ pub(super) fn handle_msg(
                 app.focus = Focus::Browsing;
             }
         }
-        AppMsg::SearchDone(Err(err)) => {
+        AppMsg::SearchDone(epoch, Err(err)) => {
+            if epoch != app.search_epoch {
+                return;
+            }
             app.searching = false;
             app.message = Some(Message::error(err));
         }
@@ -149,12 +156,14 @@ pub(super) fn submit_search(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     app.history_reset();
     app.save_history();
     app.searching = true;
+    app.search_epoch += 1;
+    let epoch = app.search_epoch;
     app.message = Some(Message::info(format!("buscando «{query}»…")));
     let tx = tx.clone();
     let limit = app.results_limit;
     tokio::spawn(async move {
         let result = provider.search(&query, limit).await.map_err(|e| e.to_string());
-        let _ = tx.send(AppMsg::SearchDone(result));
+        let _ = tx.send(AppMsg::SearchDone(epoch, result));
     });
 }
 
@@ -208,6 +217,7 @@ pub(super) fn play_queue_track_from(
     ));
     // Estadísticas de escucha: cada arranque de pista cuenta.
     app.stats.record(&app.queue.tracks[index]);
+    app.stats_dirty = true;
     app.refresh_stats_view();
     app.save_stats();
     app.queue_select(index);

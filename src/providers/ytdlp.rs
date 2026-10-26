@@ -36,7 +36,29 @@ pub(crate) async fn youtube_mix(video_id: &str) -> Result<Vec<Track>> {
 }
 
 async fn run_ytdlp(args: &[String]) -> Result<String> {
-    let output = Command::new("yt-dlp")
+    run_ytdlp_with("yt-dlp", args).await
+}
+
+/// El nombre del binario es inyectable para poder probar el reintento con un
+/// ejecutable falso, sin tocar el PATH global del proceso.
+async fn run_ytdlp_with(binary: &str, args: &[String]) -> Result<String> {
+    // Un fallo transitorio (timeout, 502) no debe tumbar la búsqueda:
+    // un reintento tras una breve espera suele bastar.
+    let mut last_err = String::new();
+    for attempt in 0..2 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        }
+        match run_ytdlp_once(binary, args).await {
+            Ok(stdout) => return Ok(stdout),
+            Err(err) => last_err = err.to_string(),
+        }
+    }
+    bail!("{last_err}")
+}
+
+async fn run_ytdlp_once(binary: &str, args: &[String]) -> Result<String> {
+    let output = Command::new(binary)
         .args(args)
         .args(["--dump-json", "--flat-playlist", "--no-warnings"])
         .stdin(Stdio::null())
@@ -121,5 +143,62 @@ mod tests {
         let line = r#"{"id":"abc","title":"X","uploader":"Y","duration":-3.5,"webpage_url":"https://www.youtube.com/watch?v=abc"}"#;
         let track = parse_entry(line, ProviderKind::Youtube).expect("entrada válida");
         assert_eq!(track.duration, Some(Duration::ZERO));
+    }
+
+    /// Script falso de yt-dlp: falla `failures` veces (contando en un
+    /// archivo) y después imprime JSON de una pista.
+    fn fake_ytdlp_script(dir: &std::path::Path, failures: u32) -> std::path::PathBuf {
+        let script = dir.join("yt-dlp-fake");
+        let counter = dir.join("fake-counter");
+        let body = format!(
+            "#!/bin/sh\n\
+             n=$(cat \"{counter}\" 2>/dev/null || echo 0)\n\
+             n=$((n+1)); echo $n > \"{counter}\"\n\
+             if [ $n -le {failures} ]; then echo 'error transitorio' >&2; exit 1; fi\n\
+             echo '{{\"id\":\"x\",\"title\":\"T\",\"uploader\":\"A\",\"duration\":100,\"webpage_url\":\"https://www.youtube.com/watch?v=x\"}}'\n",
+            counter = counter.display(),
+            failures = failures,
+        );
+        std::fs::write(&script, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script, perms).unwrap();
+        }
+        script
+    }
+
+    #[tokio::test]
+    async fn retry_recovers_from_transient_failure() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-ytdlp-retry-ok-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = fake_ytdlp_script(&dir, 1);
+        let out = run_ytdlp_with(binary.to_str().unwrap(), &[])
+            .await
+            .expect("el reintento recupera el fallo transitorio");
+        assert!(out.contains("\"id\":\"x\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn retry_gives_up_after_second_failure() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-ytdlp-retry-fail-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = fake_ytdlp_script(&dir, 5);
+        let err = run_ytdlp_with(binary.to_str().unwrap(), &[])
+            .await
+            .expect_err("dos fallos seguidos propagan el error");
+        assert!(err.to_string().contains("error transitorio"), "{err:#}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
