@@ -29,11 +29,14 @@ async fn main() -> Result<()> {
         );
         std::process::exit(1);
     }
-    if let Err(err) = check_dependencies().await {
-        eprintln!("{err:#}");
-        std::process::exit(1);
-    }
-    let ytdlp_stale = ytdlp_staleness_warning().await;
+    let ytdlp_version = match check_dependencies().await {
+        Ok(version) => version,
+        Err(err) => {
+            eprintln!("{err:#}");
+            std::process::exit(1);
+        }
+    };
+    let ytdlp_stale = ytdlp_staleness_warning(&ytdlp_version);
     let mut config = Config::load()?;
     if let Some(name) = &cli.theme {
         match shellmusic::theme::find_preset(name) {
@@ -164,49 +167,45 @@ fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>
         .collect()
 }
 
-async fn check_dependencies() -> Result<()> {
-    check(
-        "mpv",
-        "Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv",
-    )
-    .await?;
-    check(
-        "yt-dlp",
-        "Linux/macOS: pip install yt-dlp (o tu gestor de paquetes) · Windows: winget install yt-dlp",
-    )
-    .await?;
-    Ok(())
+async fn check_dependencies() -> Result<String> {
+    let (mpv, ytdlp) = tokio::join!(
+        check(
+            "mpv",
+            "Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv",
+        ),
+        check(
+            "yt-dlp",
+            "Linux/macOS: pip install yt-dlp (o tu gestor de paquetes) · Windows: winget install yt-dlp",
+        ),
+    );
+    mpv?;
+    // La versión de yt-dlp se reutiliza para el aviso de antigüedad: evita
+    // lanzar el proceso por tercera vez (~0,3 s de arranque de Python).
+    ytdlp
 }
 
-async fn check(binary: &str, hint: &str) -> Result<()> {
-    let available = Command::new(binary)
+/// Comprueba que `binary` está en el PATH y devuelve la primera línea de
+/// `{binary} --version`; si falta, balea con instrucciones de instalación.
+async fn check(binary: &str, hint: &str) -> Result<String> {
+    let output = Command::new(binary)
         .arg("--version")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
-        .await
-        .map(|status| status.success())
-        .unwrap_or(false);
-    if !available {
-        bail!("No se encontró «{binary}» en el PATH.\nInstálalo con: {hint}");
+        .output()
+        .await;
+    match output {
+        Ok(output) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        }
+        _ => bail!("No se encontró «{binary}» en el PATH.\nInstálalo con: {hint}"),
     }
-    Ok(())
 }
 
 /// Los parches anti-bot de YouTube llegan vía releases de yt-dlp: una versión
 /// de más de 90 días es la causa más común de roturas. Devuelve un aviso
 /// para mostrar en la TUI al arrancar (no aborta el arranque).
-async fn ytdlp_staleness_warning() -> Option<String> {
-    let output = Command::new("yt-dlp")
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let days = shellmusic::ytdlp_version_age_days(&version)?;
+fn ytdlp_staleness_warning(version: &str) -> Option<String> {
+    let days = shellmusic::ytdlp_version_age_days(version)?;
     if days > 90 {
         Some(format!(
             "yt-dlp es de {version} ({days} días); si YouTube falla, actualízalo: pip install -U yt-dlp"
