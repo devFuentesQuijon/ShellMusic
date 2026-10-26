@@ -109,6 +109,11 @@ La reproducción con red (streams de YouTube/SoundCloud) no es verificable en CI
 | RF-36 | Autocompletado de la búsqueda desde el historial local: con la caja enfocada se muestra el sufijo de la entrada más reciente con ese prefijo como "ghost text" atenuado y `→` lo acepta. Sin red, instantáneo. | Media |
 | RF-37 | `L` abre un overlay con la letra de la pista en reproducción (o la seleccionada) vía lrclib.net (sin API key; se elige la entrada con letra cuya duración más se acerque); scroll con ↑/↓, PgUp/PgDn y g/G; errores de red en el propio overlay, sin panic. | Media |
 | RF-38 | `i` abre el panel «sonando ahora»: metadata ampliada (proveedor, duración/posición, volumen, escuchas, posición en cola) y carátula de YouTube (`i.ytimg.com`) renderizada con kitty/sixel si el terminal lo soporta, con fallback a halfblocks (`ratatui-image`). SoundCloud queda sin carátula. | Baja |
+| RF-39 | Ante bloqueo anti-bot, la reproducción rota la combinación `player_client` × cookies: el cliente configurado primero, luego la cadena interna `ios`/`tv`/`web_embedded`, cada uno con su ronda de cookies; la combinación ganadora se cachea en memoria durante la sesión y, si deja de funcionar, se descarta y se recorre el plan completo de nuevo. | Alta |
+| RF-40 | Si el plugin bgutil PO Token de yt-dlp está instalado (paquete pip o carpeta de plugins), con `[youtube] pot_provider = "auto"` se prueba primero el cliente por defecto de yt-dlp (el plugin suele dar mejores streams que forzar `android`); `"off"` lo ignora. El mensaje de bloqueo final sugiere instalarlo. | Media |
+| RF-41 | Al arrancar, si `yt-dlp --version` tiene más de 90 días se muestra un aviso persistente en la línea de estado sugiriendo actualizarlo (los parches anti-bot llegan vía releases de yt-dlp); el arranque no se interrumpe y un formato irreconocible no avisa. | Media |
+
+Nota sobre la YouTube Data API v3 (evaluada y descartada): no proporciona URLs de stream (la reproducción seguiría dependiendo de yt-dlp), exige que cada usuario cree un proyecto en Google Cloud con su API key (misma fricción que llevó a posponer Spotify en la fase 5) y limita la búsqueda a 100 llamadas/día por proyecto. No aporta robustez al problema real.
 
 ### Flujo de usuario principal
 
@@ -299,8 +304,9 @@ initial_volume = 70       # 0-100
 
 [youtube]
 cookies_from_browser = "auto"   # "auto": primero sin cookies y, si YouTube bloquea, reintenta con cada navegador instalado; "firefox"/"chrome"/...: solo ese; "": nunca usar cookies
-player_client = "android"          # cliente de YouTube que yt-dlp emula ("android" evita el 403 por PO Token; "" = cliente por defecto)
+player_client = "android"          # cliente de YouTube que yt-dlp emula primero; si bloquea, se rota por ios → tv → web_embedded
 remote_components = "ejs:github"   # permite a yt-dlp resolver los retos JS de firma ("" = desactivado)
+pot_provider = "auto"              # "auto": usar el plugin bgutil PO Token de yt-dlp si está instalado (pip install bgutil-ytdlp-pot-provider); "off": ignorarlo
 
 [cache]
 enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
@@ -331,11 +337,15 @@ Si el archivo no existe al primer arranque, se crea con estos valores.
 YouTube puede bloquear la resolución de streams desde ciertas IPs (HTTP 429 / "Sign in to confirm you're not a bot" al buscar, o HTTP 403 al abrir el stream de googlevideo). Las claves de la sección `[youtube]` se traducen a `--ytdl-raw-options` de mpv (aplicadas en caliente vía IPC en cada `loadfile`):
 
 - `cookies_from_browser`:
-  - `"auto"` (por defecto): el primer intento se hace sin cookies; si falla con un error de bloqueo (patrones "Sign in to confirm", "HTTP Error 429/403", "Requested format is not available", "cookies"), se reintenta con cada navegador instalado que yt-dlp soporta (detección por binario en PATH y directorio de perfil por SO; firefox primero). El navegador que funciona se cachea en memoria durante la sesión y las siguientes pistas lo usan directamente. Si todos los intentos fallan, la UI sugiere iniciar sesión en YouTube desde algún navegador instalado (basta una sesión de visitante).
+  - `"auto"` (por defecto): el primer intento se hace sin cookies; si falla con un error de bloqueo (patrones "Sign in to confirm", "HTTP Error 429/403", "Requested format is not available", "cookies"), se reintenta con cada navegador instalado que yt-dlp soporta (detección por binario en PATH y directorio de perfil por SO; firefox primero).
   - `"firefox"`, `"chrome"`, etc.: usa solo ese navegador, sin auto-detección.
   - `""`: nunca usa cookies ni reintenta.
-- `player_client`: emular el cliente Android evita la exigencia de GVS PO Token que produce el 403 en los clientes web/visionos.
+- `player_client`: el cliente configurado se intenta primero; si todas las combinaciones de cookies fallan con bloqueo, se rota por la cadena `ios` → `tv` → `web_embedded` (cada cliente con su ronda de cookies). La combinación cliente × cookies que funciona se cachea en memoria durante la sesión; si deja de funcionar, se descarta y se recorre el plan completo de nuevo.
+- `pot_provider`: con `"auto"` y el plugin `bgutil-ytdlp-pot-provider` instalado (`pip install bgutil-ytdlp-pot-provider` o carpeta de plugins de yt-dlp), el primer intento usa el cliente por defecto de yt-dlp con PO Token, que suele dar mejores streams que forzar `android`.
 - `remote_components`: permite a yt-dlp descargar el solucionador de retos JS de firma (requiere un runtime JS como bun, deno o node instalado).
+- Antigüedad de yt-dlp: los parches anti-bot llegan vía releases de yt-dlp; si la versión instalada tiene más de 90 días, la app lo avisa al arrancar (sin bloquear).
+
+Si toda la cadena falla, el mensaje de bloqueo sugiere las tres salidas: iniciar sesión en YouTube desde un navegador instalado (basta sesión de visitante), instalar el plugin PO Token o actualizar yt-dlp.
 
 Las claves ausentes en un `config.toml` preexistente toman su valor por defecto (compatibilidad hacia atrás).
 
@@ -373,6 +383,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") — **completada** (teclas `t`/`X`/`I`; `src/stats.rs`, `src/portable.rs`, overlay de estadísticas) |
 | **14** | Pulido: cola persistente entre sesiones (`session.json`: restaurar cola + pista + posición al arrancar, con reanudación vía `start` de mpv); temas de color configurables en `[theme]` de `config.toml`; título de la pestaña del terminal con la pista en reproducción (OSC 2) — **completada** |
 | **15** | Limpieza de la cola: con el modo radio la cola crece sin límite (~5 pistas por tanda). Al superar 500 pistas (`MAX_QUEUE` en `src/queue.rs`) se podan las ya reproducidas antes de encolar más, conservando las 20 anteriores a la actual (`KEEP_BEFORE_CURRENT`) para la navegación `p`; sin reproducción en curso o con la actual cerca del inicio no se poda — **completada** |
+| **16** | Robustez anti-bot de reproducción (tras evaluar y descartar la YouTube Data API v3: no da URLs de stream y exige API key por usuario): rotación de `player_client` × cookies con caché de la combinación ganadora y reintento del plan completo si caduca; detección del plugin bgutil PO Token (`[youtube] pot_provider`); aviso al arrancar si yt-dlp tiene más de 90 días — **completada** |
 
 ---
 

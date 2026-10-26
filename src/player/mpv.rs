@@ -108,12 +108,67 @@ enum CookieAttempt {
     Browser(String),
 }
 
+/// Un intento de reproducción: cliente de YouTube emulado × cookies.
+/// YouTube bloquea clientes distintos según la IP y la época, así que ante
+/// un bloqueo se rota la combinación completa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlayAttempt {
+    /// Cliente para `youtube:player_client`; "" = el por defecto de yt-dlp.
+    client: String,
+    cookies: CookieAttempt,
+}
+
+/// Cadena de clientes de fallback cuando el configurado falla.
+const CLIENT_FALLBACKS: &[&str] = &["android", "ios", "tv", "web_embedded"];
+
+/// Construye el plan de intentos cliente × cookies: con PO Token va primero
+/// el cliente por defecto de yt-dlp, luego el configurado, luego los
+/// fallbacks, sin duplicados.
+fn build_attempt_plan(
+    configured_client: &str,
+    pot_available: bool,
+    cookie_attempts: &[CookieAttempt],
+) -> Vec<PlayAttempt> {
+    let mut clients: Vec<String> = Vec::new();
+    if pot_available {
+        clients.push(String::new());
+    }
+    clients.push(configured_client.to_string());
+    clients.extend(CLIENT_FALLBACKS.iter().map(|c| c.to_string()));
+    let mut seen = std::collections::HashSet::new();
+    clients.retain(|c| seen.insert(c.clone()));
+    clients
+        .into_iter()
+        .flat_map(|client| {
+            cookie_attempts
+                .iter()
+                .cloned()
+                .map(|cookies| PlayAttempt {
+                    client: client.clone(),
+                    cookies,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 impl CookieAttempt {
     fn label(&self) -> &str {
         match self {
             Self::None => "sin cookies",
             Self::Browser(browser) => browser,
         }
+    }
+}
+
+impl PlayAttempt {
+    fn label(&self) -> String {
+        let client = if self.client.is_empty() {
+            "default"
+        } else {
+            self.client.as_str()
+        };
+        format!("cliente {client}, {}", self.cookies.label())
     }
 }
 
@@ -141,8 +196,11 @@ pub struct MpvPlayer {
     socket_path: PathBuf,
     youtube: Youtube,
     cookies_mode: CookiesMode,
-    cached_attempt: Mutex<Option<CookieAttempt>>,
+    /// Combinación cliente × cookies que funcionó en esta sesión.
+    cached_attempt: Mutex<Option<PlayAttempt>>,
     detected_browsers: Mutex<Option<Vec<String>>>,
+    /// Detección cacheada del plugin bgutil PO Token de yt-dlp.
+    pot_detected: Mutex<Option<bool>>,
 }
 
 impl MpvPlayer {
@@ -215,6 +273,7 @@ impl MpvPlayer {
             youtube: youtube.clone(),
             cached_attempt: Mutex::new(None),
             detected_browsers: Mutex::new(None),
+            pot_detected: Mutex::new(None),
         };
         for (id, name) in [
             (1, "time-pos"),
@@ -255,23 +314,46 @@ impl MpvPlayer {
         Ok(response)
     }
 
-    fn attempt_plan(&self) -> Vec<CookieAttempt> {
-        match self.cookies_mode {
+    /// El plugin bgutil PO Token de yt-dlp (genera PO Tokens locales, la
+    /// defensa actual contra el 403 de GVS). Detección cacheada: paquete pip
+    /// o carpeta de plugin de yt-dlp.
+    fn pot_provider_available(&self) -> bool {
+        if self.youtube.pot_provider == "off" {
+            return false;
+        }
+        lock(&self.pot_detected)
+            .get_or_insert_with(detect_pot_provider)
+            .to_owned()
+    }
+
+    /// Plan de intentos: la combinación cliente × cookies que funcionó en
+    /// esta sesión va primero (y sola, mientras siga funcionando); si no hay
+    /// caché, se recorre la cadena de clientes —el configurado primero— y
+    /// para cada uno las cookies según el modo configurado. Con el plugin PO
+    /// Token disponible se prueba primero el cliente por defecto de yt-dlp
+    /// (el plugin suele dar mejores streams que forzar `android`).
+    fn attempt_plan(&self) -> Vec<PlayAttempt> {
+        if let Some(cached) = lock(&self.cached_attempt).clone() {
+            return vec![cached];
+        }
+        let cookie_attempts: Vec<CookieAttempt> = match self.cookies_mode {
             CookiesMode::Disabled => vec![CookieAttempt::None],
             CookiesMode::Fixed => vec![CookieAttempt::Browser(
                 self.youtube.cookies_from_browser.clone(),
             )],
             CookiesMode::Auto => {
-                if let Some(cached) = lock(&self.cached_attempt).clone() {
-                    return vec![cached];
-                }
                 let mut attempts = vec![CookieAttempt::None];
                 attempts.extend(
                     self.installed_browsers().into_iter().map(CookieAttempt::Browser),
                 );
                 attempts
             }
-        }
+        };
+        build_attempt_plan(
+            &self.youtube.player_client,
+            self.pot_provider_available(),
+            &cookie_attempts,
+        )
     }
 
     fn installed_browsers(&self) -> Vec<String> {
@@ -286,7 +368,7 @@ impl MpvPlayer {
             .clone()
     }
 
-    async fn apply_attempt(&self, attempt: &CookieAttempt) -> Result<()> {
+    async fn apply_attempt(&self, attempt: &PlayAttempt) -> Result<()> {
         let options = ytdl_raw_options(&self.youtube, attempt).unwrap_or_default();
         self.command(vec![
             "set_property".into(),
@@ -348,22 +430,25 @@ impl MpvPlayer {
 #[async_trait]
 impl Player for MpvPlayer {
     async fn play(&self, url: &str, start: Option<Duration>) -> Result<()> {
-        let attempts = self.attempt_plan();
+        // Si la combinación cacheada deja de funcionar (YouTube rota sus
+        // defensas), se descarta y se recorre el plan completo.
+        let mut attempts = self.attempt_plan();
+        let mut retried_full_plan = false;
         let mut last_error = String::new();
         let mut blocked = false;
-        for (index, attempt) in attempts.iter().enumerate() {
+        let mut index = 0;
+        while index < attempts.len() {
+            let attempt = &attempts[index];
             self.apply_attempt(attempt).await?;
             if index > 0 {
                 let _ = self.notify.send(PlayerEvent::Notice(PlayerNotice::info(format!(
-                    "stream bloqueado; reintentando con cookies de {}…",
+                    "stream bloqueado; reintentando: {}…",
                     attempt.label()
                 ))));
             }
             match self.try_play(url, start).await {
                 Ok(()) => {
-                    if self.cookies_mode == CookiesMode::Auto {
-                        *lock(&self.cached_attempt) = Some(attempt.clone());
-                    }
+                    *lock(&self.cached_attempt) = Some(attempt.clone());
                     return Ok(());
                 }
                 Err(err) => {
@@ -372,14 +457,24 @@ impl Player for MpvPlayer {
                     }
                     blocked = true;
                     last_error = err;
+                    // La caché era un solo intento: si falla, plan completo.
+                    if !retried_full_plan && lock(&self.cached_attempt).is_some() {
+                        *lock(&self.cached_attempt) = None;
+                        attempts = self.attempt_plan();
+                        retried_full_plan = true;
+                        index = 0;
+                        continue;
+                    }
                 }
             }
+            index += 1;
         }
         if blocked {
             bail!(
                 "YouTube bloqueó el stream (último error: {last_error}). \
-                 Inicia sesión en YouTube desde algún navegador instalado \
-                 (basta una sesión de visitante, no hace falta cuenta) y reintenta."
+                 Opciones: inicia sesión en YouTube desde algún navegador instalado \
+                 (basta una sesión de visitante), instala el proveedor de PO Token \
+                 (`pip install bgutil-ytdlp-pot-provider`) o actualiza yt-dlp."
             );
         }
         bail!("{last_error}");
@@ -445,21 +540,50 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|err| err.into_inner())
 }
 
+/// Detecta el plugin bgutil PO Token de yt-dlp: paquete pip instalado o
+/// carpeta de plugin en las rutas estándar de yt-dlp.
+fn detect_pot_provider() -> bool {
+    let pip = std::process::Command::new("pip")
+        .args(["show", "bgutil-ytdlp-pot-provider"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if pip {
+        return true;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return false;
+    };
+    ["~/.config/yt-dlp/plugins", "~/.yt-dlp/plugins"].iter().any(|dir| {
+        let dir = home.join(dir.trim_start_matches("~/"));
+        std::fs::read_dir(&dir)
+            .map(|mut entries| {
+                entries.any(|e| {
+                    e.ok()
+                        .is_some_and(|e| e.file_name().to_string_lossy().contains("bgutil"))
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// mpv puede reportar time-pos negativo (buffering inicial, seek antes del
 /// inicio); from_secs_f64 panicua con negativos, así que se clama a 0.
 fn secs_to_duration(seconds: f64) -> Duration {
     Duration::from_secs_f64(seconds.max(0.0))
 }
 
-fn ytdl_raw_options(youtube: &Youtube, attempt: &CookieAttempt) -> Option<String> {
+fn ytdl_raw_options(youtube: &Youtube, attempt: &PlayAttempt) -> Option<String> {
     let mut options = Vec::new();
-    if let CookieAttempt::Browser(browser) = attempt {
+    if let CookieAttempt::Browser(browser) = &attempt.cookies {
         options.push(format!("cookies-from-browser={browser}"));
     }
-    if !youtube.player_client.is_empty() {
+    if !attempt.client.is_empty() {
         options.push(format!(
             "extractor-args=youtube:player_client={}",
-            youtube.player_client
+            attempt.client
         ));
     }
     if !youtube.remote_components.is_empty() {
@@ -691,6 +815,46 @@ mod tests {
         assert_eq!(secs_to_duration(-2.5), Duration::ZERO);
         assert_eq!(secs_to_duration(0.0), Duration::ZERO);
         assert_eq!(secs_to_duration(1.5), Duration::from_secs_f64(1.5));
+    }
+
+    #[test]
+    fn attempt_plan_configured_client_first_then_fallbacks() {
+        let plan = build_attempt_plan("android", false, &[CookieAttempt::None]);
+        let clients: Vec<&str> = plan.iter().map(|a| a.client.as_str()).collect();
+        assert_eq!(clients, ["android", "ios", "tv", "web_embedded"]);
+    }
+
+    #[test]
+    fn attempt_plan_pot_provider_puts_default_client_first() {
+        let plan = build_attempt_plan("android", true, &[CookieAttempt::None]);
+        assert_eq!(plan[0].client, "");
+        assert_eq!(plan[1].client, "android");
+    }
+
+    #[test]
+    fn attempt_plan_dedupes_configured_client_in_fallbacks() {
+        let plan = build_attempt_plan("ios", false, &[CookieAttempt::None]);
+        let clients: Vec<&str> = plan.iter().map(|a| a.client.as_str()).collect();
+        assert_eq!(clients, ["ios", "android", "tv", "web_embedded"]);
+    }
+
+    #[test]
+    fn attempt_plan_combines_clients_with_browsers() {
+        let cookies = vec![CookieAttempt::None, CookieAttempt::Browser("firefox".into())];
+        let plan = build_attempt_plan("android", false, &cookies);
+        assert_eq!(plan.len(), 4 * 2, "4 clientes × 2 cookies");
+        assert_eq!(plan[0].client, "android");
+        assert_eq!(plan[0].cookies, CookieAttempt::None);
+        assert_eq!(plan[1].cookies, CookieAttempt::Browser("firefox".into()));
+        assert_eq!(plan[2].client, "ios");
+    }
+
+    #[test]
+    fn attempt_plan_empty_configured_client_not_duplicated_with_pot() {
+        // Config "" y PO Token activo: el cliente por defecto sale una vez.
+        let plan = build_attempt_plan("", true, &[CookieAttempt::None]);
+        let defaults = plan.iter().filter(|a| a.client.is_empty()).count();
+        assert_eq!(defaults, 1);
     }
 
     #[cfg(unix)]

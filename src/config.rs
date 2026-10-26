@@ -17,8 +17,9 @@ initial_volume = 70       # 0-100
 
 [youtube]
 cookies_from_browser = \"auto\"   # \"auto\": primero sin cookies y, si YouTube bloquea, reintenta con cada navegador instalado; \"firefox\"/\"chrome\"/...: solo ese; \"\": nunca usar cookies
-player_client = \"android\"          # cliente de YouTube que yt-dlp emula (\"android\" evita el 403 por PO Token; \"\" = cliente por defecto)
+player_client = \"android\"          # cliente de YouTube que yt-dlp emula primero (\"android\" evita el 403 por PO Token; \"\" = cliente por defecto). Si bloquea, se rota por ios/tv/web_embedded
 remote_components = \"ejs:github\"   # permite a yt-dlp resolver los retos JS de firma (\"\" = desactivado)
+pot_provider = \"auto\"              # \"auto\": usar el plugin bgutil PO Token de yt-dlp si está instalado (\"off\" = ignorarlo)
 
 [cache]
 enabled = true      # caché en memoria de búsquedas (solo dura la sesión)
@@ -88,6 +89,8 @@ pub struct Youtube {
     pub cookies_from_browser: String,
     pub player_client: String,
     pub remote_components: String,
+    /// "auto": usar el plugin bgutil PO Token si está instalado; "off": ignorarlo.
+    pub pot_provider: String,
 }
 
 impl Default for Youtube {
@@ -96,6 +99,7 @@ impl Default for Youtube {
             cookies_from_browser: "auto".to_string(),
             player_client: "android".to_string(),
             remote_components: "ejs:github".to_string(),
+            pot_provider: "auto".to_string(),
         }
     }
 }
@@ -208,6 +212,7 @@ impl Config {
         config.youtube.cookies_from_browser = config.youtube.cookies_from_browser.trim().to_string();
         config.youtube.player_client = config.youtube.player_client.trim().to_string();
         config.youtube.remote_components = config.youtube.remote_components.trim().to_string();
+        config.youtube.pot_provider = config.youtube.pot_provider.trim().to_string();
         config.cache.ttl_minutes = config.cache.ttl_minutes.clamp(1, 120);
         Ok(config)
     }

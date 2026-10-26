@@ -184,7 +184,8 @@ initial_volume = 70       # 0-100
 
 [youtube]
 cookies_from_browser = "auto"   # "auto" | "firefox"/"chrome"/... | "" (nunca usar cookies)
-player_client = "android"          # cliente de YouTube que emula yt-dlp
+player_client = "android"          # cliente de YouTube preferido; si bloquea, rota automáticamente
+pot_provider = "auto"              # usar el plugin bgutil PO Token de yt-dlp si está instalado
 remote_components = "ejs:github"   # solucionador de retos JS de yt-dlp ("" = desactivado)
 
 [cache]
@@ -266,13 +267,20 @@ En una sesión sin D-Bus (SSH, headless) los media controls se desactivan solos 
 
 ## Bloqueo anti-bot de YouTube
 
-YouTube bloquea la resolución de streams desde muchas IPs (HTTP 429 "Sign in to confirm you're not a bot" o HTTP 403 al abrir el stream). La búsqueda suele funcionar, pero la reproducción falla. La sección `[youtube]` lo mitiga:
+YouTube bloquea la resolución de streams desde muchas IPs (HTTP 429 "Sign in to confirm you're not a bot" o HTTP 403 al abrir el stream). La búsqueda suele funcionar, pero la reproducción falla. ShellMusic defiende en cadena:
+
+1. **Cliente emulado**: empieza por `player_client` (android por defecto); si YouTube lo bloquea, rota por `ios` → `tv` → `web_embedded`.
+2. **Cookies**: ante bloqueo, cada cliente reintenta con las cookies de cada navegador instalado detectado (firefox primero). La combinación cliente × cookies que funciona se recuerda durante la sesión; si caduca, se descarta y se recorre el plan completo de nuevo.
+3. **PO Token**: si instalas el plugin de yt-dlp (`pip install bgutil-ytdlp-pot-provider`), el primer intento usa el cliente por defecto con PO Token, que suele dar mejores streams. Se desactiva con `[youtube] pot_provider = "off"`.
+4. **yt-dlp al día**: los parches anti-bot llegan con cada release; si tu yt-dlp tiene más de 90 días, la app te lo advierte al arrancar.
+
+Detalle de la configuración en la sección `[youtube]` de `config.toml`:
 
 - `cookies_from_browser`:
-  - `"auto"` (por defecto): reproduce primero **sin cookies**; solo si YouTube bloquea el stream, reintenta con las cookies de cada navegador instalado detectado (firefox, chrome, chromium, brave, edge, opera, vivaldi — firefox primero). El navegador que funciona se recuerda durante la sesión, así que las siguientes pistas no repiten el ciclo. Si todo falla, la UI te pide iniciar sesión en YouTube desde algún navegador instalado (basta una sesión de visitante, no hace falta cuenta).
+  - `"auto"` (por defecto): reproduce primero **sin cookies**; solo si YouTube bloquea el stream, reintenta con las cookies de cada navegador instalado detectado (firefox, chrome, chromium, brave, edge, opera, vivaldi — firefox primero). Si todo falla, la UI te pide iniciar sesión en YouTube desde algún navegador instalado (basta una sesión de visitante, no hace falta cuenta).
   - `"firefox"`, `"chrome"`, ...: usa solo ese navegador, sin auto-detección. Requiere haber iniciado sesión de YouTube en él.
   - `""`: nunca usa cookies.
-- `player_client`: el cliente `android` evita la exigencia de GVS PO Token que produce el 403 en los clientes web por defecto.
+- `player_client`: cliente preferido; la rotación de fallback es automática.
 - `remote_components`: permite a yt-dlp descargar el solucionador de retos JS de firma desde GitHub; necesita un runtime JS instalado (`bun`, `deno` o `node`).
 
 **Privacidad**: en modo `auto` la app solo lee las cookies del navegador cuando el intento sin cookies falla. Las cookies nunca salen de tu equipo: se pasan únicamente al proceso local de yt-dlp/mpv para autenticar la petición a YouTube.

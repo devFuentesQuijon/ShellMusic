@@ -26,6 +26,7 @@ async fn main() -> Result<()> {
         eprintln!("{err:#}");
         std::process::exit(1);
     }
+    let ytdlp_stale = ytdlp_staleness_warning().await;
     let config = Config::load()?;
     let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube).await {
         Ok(ok) => ok,
@@ -49,7 +50,7 @@ async fn main() -> Result<()> {
     // Sin detección, halfblocks (funciona en cualquier terminal).
     let picker = ratatui_image::picker::Picker::from_query_stdio()
         .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
-    let result = app::run(&mut terminal, providers, player, player_events, config, picker).await;
+    let result = app::run(&mut terminal, providers, player, player_events, config, picker, ytdlp_stale).await;
     ratatui::restore();
     result
 }
@@ -115,4 +116,26 @@ async fn check(binary: &str, hint: &str) -> Result<()> {
         bail!("No se encontró «{binary}» en el PATH.\nInstálalo con: {hint}");
     }
     Ok(())
+}
+
+/// Los parches anti-bot de YouTube llegan vía releases de yt-dlp: una versión
+/// de más de 90 días es la causa más común de roturas. Devuelve un aviso
+/// para mostrar en la TUI al arrancar (no aborta el arranque).
+async fn ytdlp_staleness_warning() -> Option<String> {
+    let output = Command::new("yt-dlp")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let days = shellmusic::ytdlp_version_age_days(&version)?;
+    if days > 90 {
+        Some(format!(
+            "yt-dlp es de {version} ({days} días); si YouTube falla, actualízalo: pip install -U yt-dlp"
+        ))
+    } else {
+        None
+    }
 }

@@ -77,6 +77,7 @@ async fn auto_mode_retries_detected_browsers_on_block() {
         cookies_from_browser: "auto".to_string(),
         player_client: String::new(),
         remote_components: String::new(),
+        pot_provider: "off".to_string(),
     };
     let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, &["--ao=null"])
         .await
@@ -92,7 +93,7 @@ async fn auto_mode_retries_detected_browsers_on_block() {
         while let Ok(event) = events.try_recv() {
             if let PlayerEvent::Notice(notice) = event {
                 println!("aviso: {}", notice.text);
-                if notice.text.contains("reintentando con cookies de firefox") {
+                if notice.text.contains("reintentando") && notice.text.contains("firefox") {
                     saw_firefox_retry = true;
                 }
             }

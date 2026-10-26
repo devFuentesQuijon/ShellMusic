@@ -48,9 +48,15 @@ pub async fn run(
     mut player_events: mpsc::UnboundedReceiver<PlayerEvent>,
     config: Config,
     picker: ratatui_image::picker::Picker,
+    startup_warning: Option<String>,
 ) -> Result<()> {
     let mut app = App::new(&config)?;
     app.picker = Some(picker);
+    if let Some(warning) = startup_warning
+        && app.message.is_none()
+    {
+        app.message = Some(Message::info(warning));
+    }
     if !providers.is_empty() {
         app.providers = providers;
         app.active_provider = 0;
