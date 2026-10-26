@@ -19,7 +19,7 @@ ShellMusic es un reproductor de música con interfaz de terminal (TUI) ultralivi
 ### No-objetivos (fuera de alcance del MVP)
 
 - Gestión de cola avanzada, favoritos y playlists (fases posteriores).
-- Descarga permanente de contenido.
+- Descarga permanente de contenido (ShellMusic hace streaming; ver el aviso legal del README).
 - Interfaz gráfica (GUI) o web.
 - Integración con cuentas de usuario de las plataformas (bibliotecas personales, likes, etc.) en el MVP.
 
