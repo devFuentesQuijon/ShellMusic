@@ -1,9 +1,6 @@
-```
- ___ _        _ _ __  __         _
-/ __| |_  ___| | |  \/  |_  _ __(_)__
-\__ \ ' \/ -_) | | |\/| | || (_-< / _|
-|___/_||_\___|_|_|_|  |_|\_,_/__/_\__|
-```
+<p align="center">
+  <img src="docs/logo.png" alt="ShellMusic" width="520">
+</p>
 
 **Toda tu música, sin salir de la terminal.**
 
