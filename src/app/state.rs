@@ -176,6 +176,10 @@ pub enum Overlay {
     Help,
     /// Estadísticas de escucha ("tus más escuchadas").
     Stats,
+    /// Letra de una pista (lrclib.net).
+    Lyrics,
+    /// Panel «sonando ahora» con metadatos ampliados y carátula.
+    NowPlaying,
     /// Menú de exportación JSON (qué incluir).
     Export,
     /// Input de ruta para exportar o importar.
@@ -265,6 +269,18 @@ pub struct App {
     pub stats_state: ListState,
     /// Cache de la vista pistas ordenada (índice → pista) para Enter/a.
     pub stats_top: Vec<Track>,
+    /// Texto de la letra en el overlay (None = cargando).
+    pub lyrics_text: Option<String>,
+    /// Título de la pista de la letra cargada/pedida.
+    pub lyrics_title: String,
+    /// Scroll del overlay de letras (líneas).
+    pub lyrics_scroll: u16,
+    /// Detector de protocolo de imagen del terminal (kitty/sixel/halfblocks).
+    pub picker: Option<ratatui_image::picker::Picker>,
+    /// Carátula lista para dibujar en el panel «sonando ahora».
+    pub cover: Option<ratatui_image::protocol::StatefulProtocol>,
+    /// Pista (provider, id) de la carátula cacheada.
+    pub cover_for: Option<(ProviderKind, String)>,
 }
 
 impl App {
@@ -347,6 +363,12 @@ impl App {
             stats_by_artist: false,
             stats_state: ListState::default(),
             stats_top: Vec::new(),
+            lyrics_text: None,
+            lyrics_title: String::new(),
+            lyrics_scroll: 0,
+            picker: None,
+            cover: None,
+            cover_for: None,
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
@@ -519,6 +541,29 @@ impl App {
         } else {
             self.history_index = None;
             self.input = self.history_draft.clone();
+        }
+    }
+
+    /// Sugerencia de autocompletado: la entrada más reciente del historial
+    /// que empiece por el input actual (y sea más larga). No hay sugerencia
+    /// con input vacío ni mientras se navega el historial con ↑/↓.
+    pub fn history_suggestion(&self) -> Option<&str> {
+        if self.input.is_empty() || self.history_index.is_some() {
+            return None;
+        }
+        self.history
+            .entries
+            .iter()
+            .rev()
+            .find(|entry| entry.len() > self.input.len() && entry.starts_with(self.input.as_str()))
+            .map(String::as_str)
+    }
+
+    /// Acepta la sugerencia de autocompletado (tecla → en la búsqueda).
+    pub fn accept_suggestion(&mut self) {
+        if let Some(suggestion) = self.history_suggestion().map(str::to_string) {
+            self.input = suggestion;
+            self.history_reset();
         }
     }
 
@@ -777,6 +822,34 @@ mod tests {
         app.history_prev();
         app.history_next();
         assert_eq!(app.input, "texto");
+    }
+
+    #[test]
+    fn history_suggestion_completes_from_most_recent() {
+        let mut app = app_with_history(&["daft punk", "david bowie", "daft punk remix"]);
+        app.input = "da".to_string();
+        // La más reciente con ese prefijo gana.
+        assert_eq!(app.history_suggestion(), Some("daft punk remix"));
+        app.input = "dav".to_string();
+        assert_eq!(app.history_suggestion(), Some("david bowie"));
+        // Sin prefijo completo no hay sugerencia; input vacío tampoco.
+        app.input = "daft punk remix".to_string();
+        assert_eq!(app.history_suggestion(), None);
+        app.input.clear();
+        assert_eq!(app.history_suggestion(), None);
+    }
+
+    #[test]
+    fn accept_suggestion_completes_input() {
+        let mut app = app_with_history(&["daft punk"]);
+        app.input = "da".to_string();
+        app.accept_suggestion();
+        assert_eq!(app.input, "daft punk");
+        // Navegando el historial no se sugiere nada.
+        let mut app = app_with_history(&["daft punk"]);
+        app.input = "otra".to_string();
+        app.history_prev();
+        assert_eq!(app.history_suggestion(), None);
     }
 
     #[test]

@@ -35,6 +35,12 @@ tokio = { version = "1", features = [
 ] }
 toml = "1"
 notify-rust = "4"
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Backend zbus (pure Rust): no requiere libdbus del sistema.

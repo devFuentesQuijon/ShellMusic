@@ -104,6 +104,9 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-33 | Estadísticas locales de escucha: cada arranque de pista incrementa su conteo en `stats.json` (mismo dir de datos, escritura atómica, corrupto → `.bak`). `t` abre el overlay «Tus más escuchadas»: top pistas por reproducciones (`Enter` reproduce, `a` encola) y top artistas (se alterna con `Tab`). | Media |
 | RF-34 | Notificación de escritorio al cambiar de pista (`notify-rust`, `[integrations] notifications`); el fallo de una notificación nunca se muestra en la UI ni interrumpe la app. | Media |
 | RF-35 | MPRIS en Linux (`souvlaki`, backend zbus): teclas multimedia, widgets del escritorio y KDE Connect controlan play/pausa, stop, siguiente/anterior, seek, posición y volumen; metadata (título, artista, duración) y estado de reproducción se publican al cambiar. Sin D-Bus de sesión (SSH/headless) la app arranca igualmente con un aviso. En macOS/Windows no hay media controls: exigen ventana/event loop de GUI, incompatibles con una TUI (limitación documentada). | Alta |
+| RF-36 | Autocompletado de la búsqueda desde el historial local: con la caja enfocada se muestra el sufijo de la entrada más reciente con ese prefijo como "ghost text" atenuado y `→` lo acepta. Sin red, instantáneo. | Media |
+| RF-37 | `L` abre un overlay con la letra de la pista en reproducción (o la seleccionada) vía lrclib.net (sin API key; se elige la entrada con letra cuya duración más se acerque); scroll con ↑/↓, PgUp/PgDn y g/G; errores de red en el propio overlay, sin panic. | Media |
+| RF-38 | `i` abre el panel «sonando ahora»: metadata ampliada (proveedor, duración/posición, volumen, escuchas, posición en cola) y carátula de YouTube (`i.ytimg.com`) renderizada con kitty/sixel si el terminal lo soporta, con fallback a halfblocks (`ratatui-image`). SoundCloud queda sin carátula. | Baja |
 
 ### Flujo de usuario principal
 
@@ -168,6 +171,8 @@ src/
 ├── favorites.rs       # favoritos locales (persistencia JSON atómica)
 ├── playlists.rs       # playlists locales (persistencia JSON atómica)
 ├── browsers.rs        # detección de navegadores instalados (cookies anti-bot)
+├── history.rs         # historial de búsquedas (persistencia JSON atómica)
+├── lyrics.rs          # letras de canciones vía lrclib.net (reqwest)
 ├── session.rs         # cola persistente entre sesiones (persistencia JSON atómica)
 ├── stats.rs           # estadísticas de escucha (conteos por pista/artista)
 ├── portable.rs        # exportar/importar playlists y favoritos (JSON/M3U)
@@ -188,6 +193,7 @@ src/
     ├── favorites.rs   # panel de favoritos
     ├── playlists.rs   # overlay modal de playlists
     ├── stats.rs       # overlay de estadísticas («tus más escuchadas») y exportar/importar
+    ├── nowplaying.rs  # overlay de letras y panel «sonando ahora» (carátula)
     ├── help.rs        # overlay modal de ayuda de atajos (tecla ?)
     └── player_bar.rs  # progreso, volumen, track actual, posición en cola, repetición
 ```
@@ -238,6 +244,7 @@ pub trait Player: Send + Sync {
 | ↑ / ↓ | Búsqueda | Navegar el historial de búsquedas (con borrador restaurable) |
 | Esc / Tab | Búsqueda | Pasar a resultados |
 | Tab / Shift+Tab | Global (fuera de edición) | Ciclar foco: Búsqueda → Resultados → Cola → Favoritos |
+| → | Búsqueda | Aceptar el autocompletado del historial (ghost text) |
 | ↑ / ↓ (o k / j) | Resultados / Cola / Favoritos | Mover selección |
 | Enter | Resultados | Reproducir selección (y añadirla a la cola si no está) |
 | a | Resultados | Añadir a la cola sin interrumpir la reproducción |
@@ -266,6 +273,8 @@ pub trait Player: Send + Sync {
 | t | Resultados / Cola / Favoritos | Overlay «Tus más escuchadas» (estadísticas; `Tab` alterna pistas/artistas, `Enter` reproduce, `a` encola, `Esc` cierra) |
 | X | Resultados / Cola / Favoritos | Exportar playlists/favoritos a JSON (menú de ámbito + ruta); en contenido de playlist: exportarla a M3U |
 | I | Resultados / Cola / Favoritos | Importar desde `.json` (fusiona) o `.m3u`/`.m3u8` (crea playlist) |
+| L | Resultados / Cola / Favoritos | Overlay con la letra de la pista que suena (o la seleccionada) |
+| i | Resultados / Cola / Favoritos | Panel «sonando ahora» con metadata y carátula |
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al empezar la última pista de la cola, encola pistas relacionadas por adelantado) |
 | R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares (mix RD de YouTube) → random (artista al azar de favoritos) → random género (palabra clave al azar) → rarezas (deep cuts del artista) |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
@@ -357,7 +366,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 9.1 | Bug (panic): `cannot convert float seconds to Duration: value is negative` (`core/src/time.rs`). mpv puede reportar `time-pos` negativo (buffering inicial o seek antes del inicio) y `Duration::from_secs_f64` panicua con negativos en `src/player/mpv.rs` (`status()`, helper `secs_to_duration`); también clamado en `src/providers/ytdlp.rs` (`parse_entry`, duración inválida). Viola RNF-4 (ningún error produce panic) — **completada** |
 | 9.2 | Prefetch de radio: la expansión se dispara al empezar a sonar la última pista de la cola (antes: al agotarse), encolando la tanda siguiente en segundo plano sin interrumpir; al terminar la pista la siguiente entra sin pausa. Guardas: `radio_expanded_for` (no duplicar búsquedas ni martillear yt-dlp tras fallos) y `playback_active` (RadioDone solo auto-reproduce con el reproductor parado) — **completada** |
 | **10** | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists — **completada** |
-| 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
+| 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local (`→` acepta el ghost text); overlay de letras (API lrclib.net, tecla `L`); panel "sonando ahora" con metadatos ampliados y carátula de YouTube (kitty/sixel/halfblocks vía `ratatui-image`, tecla `i`) — **completada** |
 | 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`, `[integrations] notifications`); MPRIS en Linux (`souvlaki` con backend zbus: teclas multimedia, widgets, KDE Connect; `[integrations] media_controls`). Media keys en Windows/macOS **descartadas**: requieren ventana (HWND) o event loop de GUI (AppDelegate), incompatibles con una TUI pura — **completada** |
 | 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") — **completada** (teclas `t`/`X`/`I`; `src/stats.rs`, `src/portable.rs`, overlay de estadísticas) |
 | **14** | Pulido: cola persistente entre sesiones (`session.json`: restaurar cola + pista + posición al arrancar, con reanudación vía `start` de mpv); temas de color configurables en `[theme]` de `config.toml`; título de la pestaña del terminal con la pista en reproducción (OSC 2) — **completada** |

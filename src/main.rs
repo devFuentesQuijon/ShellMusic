@@ -44,7 +44,12 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     };
-    let result = app::run(&mut terminal, providers, player, player_events, config).await;
+    // La detección del protocolo de imagen consulta al terminal por
+    // stdin/stdout: debe hacerse antes de arrancar el lector de eventos.
+    // Sin detección, halfblocks (funciona en cualquier terminal).
+    let picker = ratatui_image::picker::Picker::from_query_stdio()
+        .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
+    let result = app::run(&mut terminal, providers, player, player_events, config, picker).await;
     ratatui::restore();
     result
 }

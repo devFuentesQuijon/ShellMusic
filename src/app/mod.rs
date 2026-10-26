@@ -31,6 +31,14 @@ pub(super) enum AppMsg {
     Error(String),
     PlaybackStarted,
     RadioDone(String, Result<Vec<Track>, String>, u64),
+    LyricsDone(Result<String, String>),
+    CoverDone(Result<CoverImage, String>),
+}
+
+/// Carátula descargada y decodificada, lista para convertir en protocolo.
+pub struct CoverImage {
+    pub track: (ProviderKind, String),
+    pub image: image::DynamicImage,
 }
 
 pub async fn run(
@@ -39,8 +47,10 @@ pub async fn run(
     player: Arc<dyn Player>,
     mut player_events: mpsc::UnboundedReceiver<PlayerEvent>,
     config: Config,
+    picker: ratatui_image::picker::Picker,
 ) -> Result<()> {
     let mut app = App::new(&config)?;
+    app.picker = Some(picker);
     if !providers.is_empty() {
         app.providers = providers;
         app.active_provider = 0;

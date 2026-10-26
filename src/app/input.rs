@@ -9,9 +9,9 @@ use crate::queue::Queue;
 
 use super::AppMsg;
 use super::playback::{
-    add_to_queue, change_volume, play_adjacent, play_queue_track, play_result,
-    radio_prefetch, remove_from_queue, seek_by, shuffle_queue, spawn_player, submit_search,
-    toggle_favorite,
+    add_to_queue, change_volume, open_lyrics, play_adjacent, play_queue_track, play_result,
+    radio_prefetch, remove_from_queue, request_cover, seek_by, shuffle_queue, spawn_player,
+    submit_search, toggle_favorite,
 };
 use super::state::{App, Focus, Message, NameContext, Overlay, PathAction};
 
@@ -47,6 +47,7 @@ pub(super) fn handle_key(
             }
             KeyCode::Up => app.history_prev(),
             KeyCode::Down => app.history_next(),
+            KeyCode::Right => app.accept_suggestion(),
             KeyCode::Backspace => {
                 app.input.pop();
             }
@@ -266,6 +267,18 @@ fn playback_key(
             }
         }
         KeyCode::Char('m') => app.next_provider(),
+        KeyCode::Char('L') => {
+            let track = current_or_selected(app);
+            open_lyrics(app, track, tx);
+        }
+        KeyCode::Char('i') => {
+            if app.queue.current_track().is_some() {
+                app.overlay = Overlay::NowPlaying;
+                request_cover(app, tx);
+            } else {
+                app.message = Some(Message::info("nada en reproducción"));
+            }
+        }
         KeyCode::Char('t') => app.open_stats(),
         KeyCode::Char('X') => {
             app.overlay = Overlay::Export;
@@ -325,6 +338,58 @@ fn handle_overlay_key(
         Overlay::Stats => overlay_stats_key(app, key, player, tx),
         Overlay::Export => overlay_export_key(app, key),
         Overlay::PathInput(action) => overlay_path_key(app, key, &action),
+        Overlay::Lyrics => overlay_lyrics_key(app, key),
+        Overlay::NowPlaying => match key.code {
+            KeyCode::Esc | KeyCode::Char('i') => app.overlay = Overlay::Closed,
+            _ => {}
+        },
+    }
+}
+
+/// Pista para la letra: la que suena; si no, la seleccionada según el foco.
+fn current_or_selected(app: &App) -> Option<Track> {
+    if let Some(track) = app.queue.current_track() {
+        return Some(track.clone());
+    }
+    match app.focus {
+        Focus::Browsing => app.selected().and_then(|i| app.results.get(i)).cloned(),
+        Focus::Queue => app
+            .queue_selected()
+            .and_then(|i| app.queue.tracks.get(i))
+            .cloned(),
+        Focus::Favorites => app
+            .favorites_selected()
+            .and_then(|i| app.favorites.tracks.get(i))
+            .cloned(),
+        Focus::Searching => None,
+    }
+}
+
+/// Scroll del overlay de letras.
+fn overlay_lyrics_key(app: &mut App, key: KeyEvent) {
+    let lines = app
+        .lyrics_text
+        .as_ref()
+        .map_or(1, |t| t.lines().count() as u16);
+    let max_scroll = lines.saturating_sub(app.overlay_page_size as u16);
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('L') => app.overlay = Overlay::Closed,
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.lyrics_scroll = app.lyrics_scroll.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.lyrics_scroll = (app.lyrics_scroll + 1).min(max_scroll);
+        }
+        KeyCode::PageUp => {
+            app.lyrics_scroll = app.lyrics_scroll.saturating_sub(app.overlay_page_size as u16);
+        }
+        KeyCode::PageDown => {
+            app.lyrics_scroll =
+                (app.lyrics_scroll + app.overlay_page_size as u16).min(max_scroll);
+        }
+        KeyCode::Char('g') => app.lyrics_scroll = 0,
+        KeyCode::Char('G') => app.lyrics_scroll = max_scroll,
+        _ => {}
     }
 }
 

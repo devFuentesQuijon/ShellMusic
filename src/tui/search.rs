@@ -1,6 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, Paragraph};
 
 use super::fmt_duration;
@@ -19,8 +20,18 @@ pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         Style::default()
     };
-    let input =
-        Paragraph::new(app.input.as_str()).block(Block::bordered().title(title).border_style(border_style));
+    let input = Paragraph::new(Line::from({
+        let mut spans = vec![Span::raw(app.input.as_str())];
+        // Ghost text: autocompletado desde el historial (→ acepta).
+        if focused && let Some(suggestion) = app.history_suggestion() {
+            spans.push(Span::styled(
+                &suggestion[app.input.len()..],
+                Style::new().fg(app.theme.muted),
+            ));
+        }
+        spans
+    }))
+    .block(Block::bordered().title(title).border_style(border_style));
     frame.render_widget(input, area);
     if focused {
         let cursor_x = area.x + 1 + app.input.chars().count() as u16;

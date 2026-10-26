@@ -34,6 +34,22 @@ pub(super) fn handle_msg(
             app.message = Some(Message::error(err));
         }
         AppMsg::Error(err) => app.message = Some(Message::error(err)),
+        AppMsg::LyricsDone(result) => {
+            app.lyrics_text = Some(match result {
+                Ok(text) => text,
+                Err(err) => format!("No se pudo cargar la letra: {err}"),
+            });
+            app.lyrics_scroll = 0;
+        }
+        AppMsg::CoverDone(Ok(cover)) => {
+            if let Some(picker) = &app.picker {
+                app.cover = Some(picker.new_resize_protocol(cover.image));
+                app.cover_for = Some(cover.track);
+            }
+        }
+        AppMsg::CoverDone(Err(_)) => {
+            // Sin carátula el panel funciona igual: el fallo es silencioso.
+        }
         AppMsg::PlaybackStarted => {
             if app.message.as_ref().is_some_and(|m| !m.is_error) {
                 app.message = None;
@@ -552,6 +568,63 @@ pub(super) fn change_volume(
         if let Err(err) = player.set_volume(volume).await {
             let _ = tx.send(AppMsg::Error(format!("no se pudo ajustar el volumen: {err}")));
         }
+    });
+}
+
+/// Descarga la carátula de la pista actual (miniatura pública de YouTube)
+/// si no está ya cacheada. SoundCloud no tiene equivalente sin API: el
+/// panel funciona sin imagen.
+pub(super) fn request_cover(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
+    let Some(track) = app.queue.current_track() else {
+        return;
+    };
+    if track.provider != ProviderKind::Youtube {
+        return;
+    }
+    let key = (track.provider, track.id.clone());
+    if app.cover_for.as_ref() == Some(&key) {
+        return;
+    }
+    let url = format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", track.id);
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let result = async {
+            let bytes = reqwest::Client::builder()
+                .user_agent(concat!("ShellMusic/", env!("CARGO_PKG_VERSION")))
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .map_err(|err| err.to_string())?
+                .get(&url)
+                .send()
+                .await
+                .map_err(|err| err.to_string())?
+                .bytes()
+                .await
+                .map_err(|err| err.to_string())?;
+            image::load_from_memory(&bytes).map_err(|err| err.to_string())
+        }
+        .await;
+        let _ = tx.send(AppMsg::CoverDone(result.map(|image| super::CoverImage {
+            track: key,
+            image,
+        })));
+    });
+}
+
+/// Tecla L: overlay de letras para la pista dada (o la que suena).
+pub(super) fn open_lyrics(app: &mut App, track: Option<Track>, tx: &mpsc::UnboundedSender<AppMsg>) {
+    let Some(track) = track else {
+        app.message = Some(Message::info("nada que buscar letra"));
+        return;
+    };
+    app.lyrics_title = format!("{} — {}", track.title, track.artist);
+    app.lyrics_text = None;
+    app.lyrics_scroll = 0;
+    app.overlay = super::state::Overlay::Lyrics;
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let result = crate::lyrics::fetch_lyrics(&track).await;
+        let _ = tx.send(AppMsg::LyricsDone(result));
     });
 }
 

@@ -1,5 +1,6 @@
 pub mod favorites;
 pub mod help;
+pub mod nowplaying;
 pub mod player_bar;
 pub mod playlists;
 pub mod queue;
@@ -52,6 +53,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     stats::draw(frame, app);
     stats::draw_export(frame, app);
     stats::draw_path_input(frame, app);
+    nowplaying::draw_lyrics(frame, app);
+    nowplaying::draw_now_playing(frame, app);
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -68,6 +71,8 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 },
                 Overlay::Help => "ayuda: Esc cierra",
                 Overlay::Stats => "estadísticas: Tab vista · Enter reproducir · Esc cierra",
+                Overlay::Lyrics => "letra: ↑/↓ scroll · Esc cierra",
+                Overlay::NowPlaying => "sonando ahora: Esc cierra",
                 Overlay::Export | Overlay::PathInput(_) => "exportar/importar: Enter confirmar · Esc cancelar",
                 _ => "playlists: las teclas se muestran dentro del panel",
             }

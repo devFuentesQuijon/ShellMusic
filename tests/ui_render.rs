@@ -177,3 +177,32 @@ fn player_bar_truncates_long_titles() {
     assert!(screen.contains("radio:ON"), "indicadores visibles:\n{screen}");
     assert!(screen.contains('…'), "título truncado:\n{screen}");
 }
+
+#[test]
+fn lyrics_overlay_shows_text_and_title() {
+    use shellmusic::app::Overlay;
+    let mut app = test_app();
+    app.overlay = Overlay::Lyrics;
+    app.lyrics_title = "Canción — Artista".to_string();
+    app.lyrics_text = Some("primera línea\nsegunda línea".to_string());
+
+    let screen = render(&mut app);
+    assert!(screen.contains("Letra: Canción — Artista"), "título:\n{screen}");
+    assert!(screen.contains("primera línea"), "contenido:\n{screen}");
+}
+
+#[test]
+fn now_playing_overlay_shows_metadata_without_cover() {
+    use shellmusic::app::Overlay;
+    let mut app = test_app();
+    app.queue.add(track("a", "Sonando"));
+    app.queue.current = Some(0);
+    app.overlay = Overlay::NowPlaying;
+
+    let screen = render(&mut app);
+    assert!(screen.contains("Sonando ahora"), "título:\n{screen}");
+    assert!(screen.contains("Título:"), "metadata:\n{screen}");
+    assert!(screen.contains("Sonando"), "nombre de la pista:\n{screen}");
+    // Sin picker en tests: la zona de carátula muestra el placeholder.
+    assert!(screen.contains("cargando carátula"), "placeholder:\n{screen}");
+}

@@ -44,6 +44,14 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Descubrimiento",
+        &[
+            ("→", "autocompletar búsqueda desde el historial"),
+            ("L", "letra de la pista (lrclib.net)"),
+            ("i", "panel «sonando ahora» con carátula"),
+        ],
+    ),
+    (
         "General",
         &[
             ("Tab / Shift+Tab", "ciclar paneles"),

@@ -28,6 +28,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Estadísticas de escucha** (`t`): tus pistas y artistas más escuchados, con reproducción directa desde el ranking.
 - **Portabilidad** (`X`/`I`): exporta playlists y favoritos a JSON o M3U e impórtalos en otro equipo.
 - **Integración con el sistema**: notificación de escritorio al cambiar de pista y, en Linux, MPRIS (teclas multimedia, widgets del escritorio, KDE Connect).
+- **Descubrimiento**: autocompletado de la búsqueda desde tu historial (`→`), letras de canciones (`L`, vía lrclib.net) y panel «sonando ahora» con carátula (`i`).
 - **Ayuda contextual** de atajos con `?`.
 - **Caché en memoria** de búsquedas y mitigación del bloqueo anti-bot de YouTube (cookies del navegador solo cuando hacen falta; nunca salen de tu equipo).
 - Binario único para Linux, macOS y Windows.
@@ -97,6 +98,9 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | t | Resultados / Cola / Favoritos | Estadísticas de escucha (overlay; Tab alterna pistas/artistas) |
 | X | Resultados / Cola / Favoritos | Exportar playlists/favoritos a JSON (en una playlist: a M3U) |
 | I | Resultados / Cola / Favoritos | Importar desde `.json` o `.m3u` |
+| L | Resultados / Cola / Favoritos | Letra de la pista que suena (o la seleccionada) |
+| i | Resultados / Cola / Favoritos | Panel «sonando ahora» con metadata y carátula |
+| → | Búsqueda | Aceptar el autocompletado del historial |
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio |
 | R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares → random → random género → rarezas |
 | Ctrl+C | Global | Salir |
@@ -227,6 +231,12 @@ En todos los modos se excluyen las pistas ya reproducidas o encoladas, y no entr
 **Importar** (`I`): por extensión — `.json` fusiona sin duplicados (favoritos por pista, playlists por nombre con merge de pistas), `.m3u`/`.m3u8` crea una playlist con el nombre del archivo; las URLs de YouTube (`watch?v=` / `youtu.be/`) recuperan su id.
 
 **Estadísticas** (`t`): cada pista que arranca cuenta una reproducción en `stats.json` (mismo directorio de datos, escritura atómica). El overlay «Tus más escuchadas» muestra el ranking de pistas (`Enter` reproduce, `a` encola) y, con `Tab`, el de artistas.
+
+## Descubrimiento
+
+- **Autocompletado**: al escribir en la caja de búsqueda, el historial local sugiere el resto de la búsqueda más reciente con ese prefijo (texto atenuado); `→` lo acepta. Todo local, sin red.
+- **Letras** (`L`): overlay con la letra de la pista que suena — o de la seleccionada si no hay reproducción — vía [lrclib.net](https://lrclib.net) (sin API key). Scroll con `↑`/`↓`, `PgUp`/`PgDn` y `g`/`G`.
+- **Sonando ahora** (`i`): panel con título, artista, proveedor, posición, volumen, escuchas y la **carátula** de la pista de YouTube, en kitty/sixel si tu terminal lo soporta (Kitty, Konsole, WezTerm, foot…) y con bloques de color como fallback en el resto. En SoundCloud no hay carátula (la API pública no la expone sin credenciales).
 
 ## Integración con el sistema
 
