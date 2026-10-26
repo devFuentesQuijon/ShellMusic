@@ -25,12 +25,18 @@ pub(super) fn handle_msg(
             }
             app.searching = false;
             if tracks.is_empty() {
+                app.autoplay_first = false;
                 app.message = Some(Message::info("sin resultados"));
             } else {
                 app.message = None;
                 app.results = tracks;
                 app.select(0);
                 app.focus = Focus::Browsing;
+                // `--play`: la primera coincidencia suena sola.
+                if app.autoplay_first {
+                    app.autoplay_first = false;
+                    play_result(app, player, tx, 0);
+                }
             }
         }
         AppMsg::SearchDone(epoch, Err(err)) => {
@@ -38,6 +44,7 @@ pub(super) fn handle_msg(
                 return;
             }
             app.searching = false;
+            app.autoplay_first = false;
             app.message = Some(Message::error(err));
         }
         AppMsg::Error(err) => app.message = Some(Message::error(err)),
@@ -1008,6 +1015,54 @@ mod tests {
             app.radio_expanded_for, None,
             "hay siguiente en cola: sin prefetch"
         );
+    }
+
+    #[tokio::test]
+    async fn search_done_with_autoplay_first_plays_top_result() {
+        let mut app = app_with_provider("autoplay");
+        app.autoplay_first = true;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let epoch = app.search_epoch;
+
+        handle_msg(
+            &mut app,
+            AppMsg::SearchDone(epoch, Ok(vec![track("x"), track("y")])),
+            &player,
+            &tx,
+        );
+        assert_eq!(app.queue.current, Some(0), "suena la primera coincidencia");
+        assert_eq!(app.queue.tracks[0].id, "x");
+        assert!(!app.autoplay_first, "el flag se consume");
+
+        // Sin el flag no auto-reproduce: el usuario decide con Enter.
+        handle_msg(
+            &mut app,
+            AppMsg::SearchDone(epoch, Ok(vec![track("z")])),
+            &player,
+            &tx,
+        );
+        assert_eq!(app.queue.len(), 1, "la segunda búsqueda no auto-reproduce");
+        assert_eq!(app.results[0].id, "z");
+        assert!(app.queue.current.is_some(), "la reproducción sigue en la pista x");
+    }
+
+    #[tokio::test]
+    async fn search_done_empty_results_clears_autoplay_flag() {
+        let mut app = app_with_provider("autoplay-vacio");
+        app.autoplay_first = true;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let epoch = app.search_epoch;
+
+        handle_msg(
+            &mut app,
+            AppMsg::SearchDone(epoch, Ok(vec![])),
+            &player,
+            &tx,
+        );
+        assert!(!app.autoplay_first, "sin resultados el flag también se consume");
+        assert!(app.queue.is_empty());
     }
 
     #[tokio::test]

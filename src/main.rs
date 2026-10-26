@@ -15,6 +15,13 @@ use tokio::process::Command;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = match parse_args() {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("{err}\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    };
     if !std::io::stdout().is_terminal() {
         eprintln!(
             "ShellMusic necesita un terminal interactivo (TTY) para su interfaz.\n\
@@ -27,7 +34,19 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
     let ytdlp_stale = ytdlp_staleness_warning().await;
-    let config = Config::load()?;
+    let mut config = Config::load()?;
+    if let Some(name) = &cli.theme {
+        match shellmusic::theme::find_preset(name) {
+            Some(preset) => config.theme = preset.clone(),
+            None => {
+                eprintln!(
+                    "Tema desconocido: «{name}». Disponibles: {}",
+                    shellmusic::theme::preset_names().join(", ")
+                );
+                std::process::exit(2);
+            }
+        }
+    }
     let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube).await {
         Ok(ok) => ok,
         Err(err) => {
@@ -50,9 +69,66 @@ async fn main() -> Result<()> {
     // Sin detección, halfblocks (funciona en cualquier terminal).
     let picker = ratatui_image::picker::Picker::from_query_stdio()
         .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
-    let result = app::run(&mut terminal, providers, player, player_events, config, picker, ytdlp_stale).await;
+    let result = app::run(
+        &mut terminal,
+        providers,
+        player,
+        player_events,
+        config,
+        picker,
+        app::Startup {
+            warning: ytdlp_stale,
+            play: cli.play,
+        },
+    )
+    .await;
     ratatui::restore();
     result
+}
+
+const USAGE: &str = "Uso: smusic [--theme <nombre>] [--play <búsqueda>]
+
+Opciones:
+  --theme <nombre>   usa un tema empaquetado en lugar del de config.toml
+  --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
+  -h, --help         muestra esta ayuda";
+
+struct Cli {
+    theme: Option<String>,
+    play: Option<String>,
+    help: bool,
+}
+
+fn parse_args() -> std::result::Result<Cli, String> {
+    let mut cli = Cli {
+        theme: None,
+        play: None,
+        help: false,
+    };
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--theme" => {
+                cli.theme = Some(
+                    args.next()
+                        .ok_or_else(|| "--theme necesita un nombre de tema".to_string())?,
+                );
+            }
+            "--play" => {
+                cli.play = Some(
+                    args.next()
+                        .ok_or_else(|| "--play necesita un texto de búsqueda".to_string())?,
+                );
+            }
+            "-h" | "--help" => cli.help = true,
+            other => return Err(format!("argumento desconocido: {other}")),
+        }
+    }
+    if cli.help {
+        println!("{USAGE}");
+        std::process::exit(0);
+    }
+    Ok(cli)
 }
 
 fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>)> {

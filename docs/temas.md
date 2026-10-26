@@ -95,6 +95,30 @@ muted = "#37474f"      # fondo del lago
 progress = "#64ffda"   # brillo bajo el agua
 ```
 
+## Thriller
+
+Es un reproductor de música: no podía faltar. Rojo chaqueta de Michael, dorado del videoclip, naranja de la caldera.
+
+```toml
+[theme]
+accent = "#d00000"     # chaqueta
+highlight = "#ffb700"  # dorado del videoclip
+error = "#ff1744"
+muted = "#455a64"      # noche de neón
+progress = "#ff6d00"
+```
+
+## Probar sin tocar la configuración
+
+Todos los temas de esta colección están empaquetados en el binario y se pueden usar directamente desde la línea de comandos, sin editar `config.toml`:
+
+```sh
+smusic --theme dracula
+smusic --theme thriller --play "thriller michael jackson"
+```
+
+`--theme` acepta cualquiera de estos nombres (dracula, frankenstein, bride, wolfman, mummy, invisible, lagoon, thriller) y tiene prioridad sobre el tema de `config.toml` solo en esa ejecución. `--play` busca al arrancar y suena la primera coincidencia. Con `--help` ves ambas opciones.
+
 ## Crear el tuyo
 
 Los cinco roles:

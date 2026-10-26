@@ -45,6 +45,16 @@ smusic
 cargo run --release
 ```
 
+### Arranque con tema y reproducción directa
+
+```sh
+smusic --theme dracula          # tema empaquetado sin tocar config.toml
+smusic --play "daft punk"       # busca y suena la primera coincidencia
+smusic --theme thriller --play "thriller"   # ambas a la vez
+```
+
+Los temas disponibles (`--help` los lista): dracula, frankenstein, bride, wolfman, mummy, invisible, lagoon, thriller — la [colección completa con muestras](docs/temas.md).
+
 ## Dependencias
 
 ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las instrucciones y sale sin panic.

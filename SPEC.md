@@ -118,6 +118,7 @@ La reproducción con red (streams de YouTube/SoundCloud) no es verificable en CI
 | RF-45 | La sesión (cola + pista + posición) y las estadísticas pendientes se guardan periódicamente cada ~30 s durante la reproducción: un `kill -9` pierde como máximo 30 s. | Media |
 | RF-46 | Los locks de guardado detectan huérfanos: si el proceso dueño murió (PID inexistente) o el lock lleva más de 5 min, se reemplaza en lugar de bloquear todos los guardados futuros. | Alta |
 | RF-47 | Las estadísticas agrupan artistas por forma canónica offline («Daft Punk - Topic», «VEVO», «feat.»… se unifican), mostrando la forma original más frecuente; no muta datos persistidos. | Baja |
+| RF-48 | Argumentos de línea de comandos: `--theme <nombre>` aplica un tema empaquetado (dracula, frankenstein, bride, wolfman, mummy, invisible, lagoon, thriller) con prioridad sobre `config.toml` solo en esa ejecución; nombre desconocido → error con la lista de disponibles. `--play <búsqueda>` lanza la búsqueda al arrancar y reproduce la primera coincidencia automáticamente. `-h`/`--help` muestra el uso. Los presets son fuente única de verdad en `src/theme.rs`; `docs/temas.md` es su vista legible. | Media |
 
 Nota sobre la YouTube Data API v3 (evaluada y descartada): no proporciona URLs de stream (la reproducción seguiría dependiendo de yt-dlp), exige que cada usuario cree un proyecto en Google Cloud con su API key (misma fricción que llevó a posponer Spotify en la fase 5) y limita la búsqueda a 100 llamadas/día por proyecto. No aporta robustez al problema real.
 

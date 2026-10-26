@@ -46,6 +46,14 @@ pub struct CoverImage {
     pub image: image::DynamicImage,
 }
 
+/// Opciones de arranque procedentes de la línea de comandos.
+pub struct Startup {
+    /// Aviso pendiente de mostrar en la línea de estado (yt-dlp antiguo).
+    pub warning: Option<String>,
+    /// `--play <búsqueda>`: buscar al arrancar y sonar la primera coincidencia.
+    pub play: Option<String>,
+}
+
 pub async fn run(
     terminal: &mut DefaultTerminal,
     providers: Vec<(ProviderKind, Arc<dyn MusicProvider>)>,
@@ -53,11 +61,11 @@ pub async fn run(
     mut player_events: mpsc::UnboundedReceiver<PlayerEvent>,
     config: Config,
     picker: ratatui_image::picker::Picker,
-    startup_warning: Option<String>,
+    startup: Startup,
 ) -> Result<()> {
     let mut app = App::new(&config)?;
     app.picker = Some(picker);
-    if let Some(warning) = startup_warning
+    if let Some(warning) = startup.warning
         && app.message.is_none()
     {
         app.message = Some(Message::info(warning));
@@ -68,6 +76,14 @@ pub async fn run(
     }
     let (tx, mut rx) = mpsc::unbounded_channel::<AppMsg>();
     let mut keys = EventStream::new();
+
+    // `--play <búsqueda>`: buscar al arrancar; la primera coincidencia suena
+    // sola en cuanto llegan los resultados (flag consumido en SearchDone).
+    if let Some(query) = startup.play {
+        app.input = query;
+        app.autoplay_first = true;
+        playback::submit_search(&mut app, &tx);
+    }
 
     // Reproductor intercambiable: si mpv muere en marcha se respawnea con
     // el volumen vigente. Guarda anti-bucle: máx. 3 respawns en 60 s.

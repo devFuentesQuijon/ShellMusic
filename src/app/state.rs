@@ -289,6 +289,9 @@ pub struct App {
     pub last_periodic_save: Option<std::time::Instant>,
     /// Hay conteos de estadísticas sin persistir desde el último save.
     pub stats_dirty: bool,
+    /// Con `--play <búsqueda>`: al llegar el primer SearchDone se reproduce
+    /// la primera coincidencia automáticamente.
+    pub autoplay_first: bool,
 }
 
 impl App {
@@ -380,6 +383,7 @@ impl App {
             cover_for: None,
             last_periodic_save: None,
             stats_dirty: false,
+            autoplay_first: false,
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
