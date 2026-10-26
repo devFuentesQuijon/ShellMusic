@@ -44,7 +44,14 @@ jobs:
 
       - name: Instalar mpv y ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install mpv ffmpeg -y --no-progress
+        run: |
+          choco install mpv ffmpeg -y --no-progress
+          # El paquete choco de mpv no siempre deja mpv.exe en el PATH:
+          # localizarlo y registrarlo explícitamente para los pasos siguientes.
+          $mpv = Get-ChildItem -Path C:\ProgramData\chocolatey -Recurse -Filter mpv.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $mpv) { throw "mpv.exe no encontrado tras la instalación" }
+          Write-Output "mpv encontrado en $($mpv.FullName)"
+          Add-Content $env:GITHUB_PATH $mpv.DirectoryName
 
       - name: Test de integración IPC de mpv (archivo local, sin red)
         run: cargo test --locked --test mpv_ipc_local -- --ignored --nocapture
