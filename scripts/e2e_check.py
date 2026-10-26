@@ -286,6 +286,47 @@ def run_suite(binary):
     url_ok = ui.wait_for(r"Resultados \(1\)", 30)
     check("URL pegada se resuelve directamente", url_ok)
 
+    # ── 7b. Bandcamp: ciclar con m, texto rechazado, URL de álbum ──────
+    ui.send("\x1b")  # foco a resultados: 'm' cicla proveedor
+    ui.pump(0.3)
+    ui.send("m")     # YouTube → SoundCloud
+    ui.pump(0.3)
+    ui.send("m")     # SoundCloud → Bandcamp
+    ui.pump(0.5)
+    check("m cicla hasta Bandcamp", ui.wait_for(r"Buscar en Bandcamp", 3))
+
+    ui.send("/")
+    ui.pump(0.3)
+    ui.send("\x7f" * 50)
+    ui.pump(0.4)
+    ui.send("daft punk")
+    ui.pump(0.3)
+    ui.send("\r")
+    check(
+        "texto en Bandcamp indica que se use URL",
+        ui.wait_for(r"Bandcamp no admite búsqueda de texto", 15),
+    )
+
+    ui.send("/")
+    ui.pump(0.3)
+    ui.send("\x7f" * 20)
+    ui.pump(0.4)
+    ui.send("https://sufjanstevens.bandcamp.com/album/carrie-lowell")
+    ui.pump(0.3)
+    ui.send("\r")
+    # "Resultados (0)" del intento anterior también casa \d+: esperar a que
+    # la resolución del álbum devuelva varias pistas.
+    n_album = 0
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        ui.pump(0.5)
+        m = re.search(r"Resultados \((\d+)\)", ui.text())
+        if m and int(m.group(1)) >= 2:
+            n_album = int(m.group(1))
+            break
+    check("URL de álbum de Bandcamp se resuelve (varias pistas)",
+          n_album >= 2, f"({n_album} pistas)")
+
     # ── 8. La app queda viva tras los errores anteriores ────────────────
     check("la app sigue viva tras errores de búsqueda", "Buscar en" in ui.text())
 

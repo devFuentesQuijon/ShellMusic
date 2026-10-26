@@ -8,6 +8,7 @@ use shellmusic::app;
 use shellmusic::config::Config;
 use shellmusic::player::mpv::MpvPlayer;
 use shellmusic::providers::cache::CachingProvider;
+use shellmusic::providers::bandcamp::BandcampProvider;
 use shellmusic::providers::soundcloud::SoundcloudProvider;
 use shellmusic::providers::youtube::YoutubeProvider;
 use shellmusic::providers::{MusicProvider, ProviderKind};
@@ -160,6 +161,7 @@ fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>
             let provider: Arc<dyn MusicProvider> = match kind {
                 ProviderKind::Youtube => Arc::new(YoutubeProvider::new(&config.youtube)),
                 ProviderKind::Soundcloud => Arc::new(SoundcloudProvider::new()),
+                ProviderKind::Bandcamp => Arc::new(BandcampProvider::new()),
             };
             let provider = if config.cache.enabled {
                 Arc::new(CachingProvider::new(

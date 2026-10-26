@@ -13,7 +13,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 
 ## Características
 
-- **Busca y reproduce** YouTube Music y SoundCloud sin abrir el navegador (`m` cambia de proveedor en caliente); también acepta URLs de vídeo o playlist pegadas en la búsqueda.
+- **Busca y reproduce** YouTube Music y SoundCloud sin abrir el navegador (`m` cambia de proveedor en caliente); también acepta URLs pegadas de vídeo, playlist o Bandcamp.
 - **Cola gestionable y persistente**: añade, quita, reordena, baraja; al cerrar y reabrir, la cola, la pista y la posición se reanudan donde lo dejaste (a prueba de `kill -9`).
 - **Modo radio** con cinco sub-modos (artista, similares, random, random género, rarezas) y prefetch sin pausa.
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube.

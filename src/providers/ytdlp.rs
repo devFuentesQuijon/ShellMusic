@@ -127,7 +127,7 @@ fn parse_entry(line: &str, provider: ProviderKind) -> Option<Track> {
         .map(str::to_string)
         .or_else(|| match provider {
             ProviderKind::Youtube => Some(format!("https://www.youtube.com/watch?v={id}")),
-            ProviderKind::Soundcloud => None,
+            ProviderKind::Soundcloud | ProviderKind::Bandcamp => None,
         })?;
     Some(Track {
         id,

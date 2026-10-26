@@ -1,3 +1,4 @@
+pub mod bandcamp;
 pub mod cache;
 pub mod soundcloud;
 pub mod youtube;
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub enum ProviderKind {
     Youtube,
     Soundcloud,
+    Bandcamp,
 }
 
 impl ProviderKind {
@@ -21,6 +23,7 @@ impl ProviderKind {
         match name {
             "youtube" => Some(Self::Youtube),
             "soundcloud" => Some(Self::Soundcloud),
+            "bandcamp" => Some(Self::Bandcamp),
             _ => None,
         }
     }
@@ -31,12 +34,13 @@ impl fmt::Display for ProviderKind {
         match self {
             ProviderKind::Youtube => write!(f, "YouTube"),
             ProviderKind::Soundcloud => write!(f, "SoundCloud"),
+            ProviderKind::Bandcamp => write!(f, "Bandcamp"),
         }
     }
 }
 
-/// Si la consulta es una URL de un proveedor conocido (YouTube o
-/// SoundCloud), devuelve ese proveedor: la búsqueda la resuelve yt-dlp
+/// Si la consulta es una URL de un proveedor conocido (YouTube, SoundCloud
+/// o Bandcamp), devuelve ese proveedor: la búsqueda la resuelve yt-dlp
 /// directamente contra la URL en lugar de buscar el texto literal.
 pub fn provider_for_url(query: &str) -> Option<ProviderKind> {
     let url = url::Url::parse(query.trim()).ok()?;
@@ -50,6 +54,9 @@ pub fn provider_for_url(query: &str) -> Option<ProviderKind> {
             Some(ProviderKind::Youtube)
         }
         "soundcloud.com" | "on.soundcloud.com" => Some(ProviderKind::Soundcloud),
+        // Bandcamp sirve cada artista en un subdominio propio.
+        "bandcamp.com" => Some(ProviderKind::Bandcamp),
+        _ if host.ends_with(".bandcamp.com") => Some(ProviderKind::Bandcamp),
         _ => None,
     }
 }
@@ -112,6 +119,40 @@ mod tests {
             provider_for_url("https://on.soundcloud.com/AbCdEfG"),
             Some(ProviderKind::Soundcloud)
         );
+    }
+
+    #[test]
+    fn url_bandcamp_apex_and_artist_subdomain_resolve_bandcamp() {
+        assert_eq!(
+            provider_for_url("https://bandcamp.com/discover/electronic"),
+            Some(ProviderKind::Bandcamp)
+        );
+        assert_eq!(
+            provider_for_url("https://sufjanstevens.bandcamp.com/album/carrie-lowell"),
+            Some(ProviderKind::Bandcamp)
+        );
+        assert_eq!(
+            provider_for_url("https://artist.bandcamp.com/track/song"),
+            Some(ProviderKind::Bandcamp)
+        );
+    }
+
+    #[test]
+    fn lookalike_domains_are_not_bandcamp() {
+        assert_eq!(provider_for_url("https://notbandcamp.com/track/x"), None);
+        assert_eq!(provider_for_url("https://bandcamp.com.evil.example/x"), None);
+    }
+
+    #[test]
+    fn provider_names_round_trip() {
+        for (name, kind) in [
+            ("youtube", ProviderKind::Youtube),
+            ("soundcloud", ProviderKind::Soundcloud),
+            ("bandcamp", ProviderKind::Bandcamp),
+        ] {
+            assert_eq!(ProviderKind::from_name(name), Some(kind));
+        }
+        assert_eq!(ProviderKind::from_name("spotify"), None);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::providers::ProviderKind;
 const DEFAULT_TOML: &str = "\
 [general]
 results_per_search = 15   # 1-50
-providers = [\"youtube\", \"soundcloud\"]   # proveedores habilitados; la tecla m cicla entre ellos
+providers = [\"youtube\", \"soundcloud\", \"bandcamp\"]   # proveedores habilitados; la tecla m cicla entre ellos
 default_provider = \"youtube\"              # proveedor activo al arrancar (debe estar en la lista)
 
 [audio]
@@ -75,7 +75,11 @@ impl Default for General {
     fn default() -> Self {
         Self {
             results_per_search: 15,
-            providers: vec!["youtube".to_string(), "soundcloud".to_string()],
+            providers: vec![
+                "youtube".to_string(),
+                "soundcloud".to_string(),
+                "bandcamp".to_string(),
+            ],
             default_provider: "youtube".to_string(),
         }
     }
