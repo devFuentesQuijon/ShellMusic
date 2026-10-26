@@ -27,6 +27,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Historial de búsquedas** navegable con `↑`/`↓`, como en un shell.
 - **Estadísticas de escucha** (`t`): tus pistas y artistas más escuchados, con reproducción directa desde el ranking.
 - **Portabilidad** (`X`/`I`): exporta playlists y favoritos a JSON o M3U e impórtalos en otro equipo.
+- **Integración con el sistema**: notificación de escritorio al cambiar de pista y, en Linux, MPRIS (teclas multimedia, widgets del escritorio, KDE Connect).
 - **Ayuda contextual** de atajos con `?`.
 - **Caché en memoria** de búsquedas y mitigación del bloqueo anti-bot de YouTube (cookies del navegador solo cuando hacen falta; nunca salen de tu equipo).
 - Binario único para Linux, macOS y Windows.
@@ -191,6 +192,10 @@ enabled = false     # modo radio activo al arrancar (se alterna con la tecla r)
 
 [theme]
 accent = "cyan"        # colores de la interfaz; ver «Título de la pestaña y temas»
+
+[integrations]
+notifications = true    # notificación de escritorio al cambiar de pista
+media_controls = true   # MPRIS en Linux; ver «Integración con el sistema»
 ```
 
 Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
@@ -222,6 +227,20 @@ En todos los modos se excluyen las pistas ya reproducidas o encoladas, y no entr
 **Importar** (`I`): por extensión — `.json` fusiona sin duplicados (favoritos por pista, playlists por nombre con merge de pistas), `.m3u`/`.m3u8` crea una playlist con el nombre del archivo; las URLs de YouTube (`watch?v=` / `youtu.be/`) recuperan su id.
 
 **Estadísticas** (`t`): cada pista que arranca cuenta una reproducción en `stats.json` (mismo directorio de datos, escritura atómica). El overlay «Tus más escuchadas» muestra el ranking de pistas (`Enter` reproduce, `a` encola) y, con `Tab`, el de artistas.
+
+## Integración con el sistema
+
+Al cambiar de pista, ShellMusic muestra una **notificación de escritorio** con título y artista (Linux, macOS y Windows). En **Linux** además se registra como reproductor **MPRIS** (`org.mpris.MediaPlayer2.shellmusic`): las teclas multimedia del teclado, los widgets del escritorio (GNOME/KDE) y **KDE Connect** pueden pausar, parar, cambiar de pista, hacer seek y ajustar el volumen; compruébalo con `playerctl -l` y `playerctl play-pause`.
+
+Se desactivan por separado en `config.toml`:
+
+```toml
+[integrations]
+notifications = true    # notificación de escritorio al cambiar de pista
+media_controls = true   # MPRIS en Linux (sin efecto en macOS/Windows)
+```
+
+En una sesión sin D-Bus (SSH, headless) los media controls se desactivan solos con un aviso en la línea de estado; la app sigue funcionando. En macOS/Windows no hay media controls porque exigen una ventana o un event loop de GUI, incompatibles con una TUI pura.
 
 ## Bloqueo anti-bot de YouTube
 

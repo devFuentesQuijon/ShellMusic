@@ -12,5 +12,6 @@ pub mod random;
 pub mod session;
 pub mod state_file;
 pub mod stats;
+pub mod system;
 pub mod theme;
 pub mod tui;

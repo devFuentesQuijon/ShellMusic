@@ -34,6 +34,10 @@ highlight = \"yellow\"   # mensajes informativos y teclas en la ayuda
 error = \"red\"          # mensajes de error
 muted = \"darkgray\"     # línea de hints y texto secundario
 progress = \"green\"     # barra de progreso
+
+[integrations]
+notifications = true    # notificación de escritorio al cambiar de pista
+media_controls = true   # MPRIS en Linux: teclas multimedia, widgets, KDE Connect
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -45,6 +49,7 @@ pub struct Config {
     pub cache: Cache,
     pub radio: Radio,
     pub theme: ThemeConfig,
+    pub integrations: Integrations,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -143,6 +148,25 @@ impl Default for ThemeConfig {
             error: "red".to_string(),
             muted: "darkgray".to_string(),
             progress: "green".to_string(),
+        }
+    }
+}
+
+/// Integración con el sistema operativo (sección `[integrations]`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Integrations {
+    /// Notificación de escritorio al cambiar de pista.
+    pub notifications: bool,
+    /// Controles multimedia del SO (MPRIS; solo tiene efecto en Linux).
+    pub media_controls: bool,
+}
+
+impl Default for Integrations {
+    fn default() -> Self {
+        Self {
+            notifications: true,
+            media_controls: true,
         }
     }
 }

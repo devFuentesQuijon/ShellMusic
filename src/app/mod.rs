@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use crate::config::Config;
 use crate::player::{Player, PlayerEvent, PlayerNotice};
 use crate::providers::{MusicProvider, ProviderKind, Track};
+use crate::system::{MediaCommand, SystemIntegration};
 use crate::tui;
 
 mod input;
@@ -47,6 +48,15 @@ pub async fn run(
     let (tx, mut rx) = mpsc::unbounded_channel::<AppMsg>();
     let mut keys = EventStream::new();
 
+    // Integración con el SO: MPRIS/media controls (Linux) y notificaciones.
+    let (media_tx, mut media_rx) = mpsc::unbounded_channel::<MediaCommand>();
+    let mut system = SystemIntegration::new(&config.integrations, media_tx);
+    if let Some(warning) = system.startup_warning.take()
+        && app.message.is_none()
+    {
+        app.message = Some(Message::info(warning));
+    }
+
     // Título de la pestaña: «ShellMusic» en reposo, pista en reproducción.
     let mut last_title = String::new();
     set_tab_title(APP_TITLE, &mut last_title);
@@ -78,6 +88,9 @@ pub async fn run(
                 }
             }
             Some(msg) = rx.recv() => handle_msg(&mut app, msg, &player, &tx),
+            Some(command) = media_rx.recv() => {
+                handle_media_command(&mut app, command, &player, &tx);
+            }
             Some(event) = player_events.recv() => match event {
                 PlayerEvent::Notice(PlayerNotice { text, is_error }) => {
                     app.message = Some(Message { text, is_error });
@@ -86,6 +99,7 @@ pub async fn run(
             },
         }
         set_tab_title(&desired_title(&app), &mut last_title);
+        system.update(&app);
         if app.should_quit {
             break;
         }
@@ -93,6 +107,53 @@ pub async fn run(
     app.save_session(app.status.position);
     set_tab_title("", &mut last_title);
     Ok(())
+}
+
+/// Ejecuta un comando de los media controls del SO (MPRIS en Linux).
+fn handle_media_command(
+    app: &mut App,
+    command: MediaCommand,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
+    use playback::{change_volume, play_adjacent, seek_by, spawn_player};
+    use crate::queue::Queue;
+    match command {
+        MediaCommand::Play | MediaCommand::Pause | MediaCommand::Toggle => {
+            spawn_player(player, tx, |p| async move { p.toggle_pause().await });
+        }
+        MediaCommand::Stop => {
+            app.queue.current = None;
+            app.radio_epoch += 1;
+            app.playback_active = false;
+            app.message = Some(Message::info("detenido"));
+            spawn_player(player, tx, |p| async move { p.stop().await });
+        }
+        MediaCommand::Next => {
+            play_adjacent(app, player, tx, Queue::next_index, "fin de la cola");
+        }
+        MediaCommand::Previous => {
+            play_adjacent(app, player, tx, Queue::prev_index, "inicio de la cola");
+        }
+        MediaCommand::SeekForward(delta) => {
+            seek_by(app, player, tx, delta.as_secs().min(i32::MAX as u64) as i32);
+        }
+        MediaCommand::SeekBackward(delta) => {
+            seek_by(app, player, tx, -(delta.as_secs().min(i32::MAX as u64) as i32));
+        }
+        MediaCommand::SetPosition(target) => {
+            // Seek relativo respecto a la posición actual conocida.
+            if let Some(current) = app.status.position {
+                let delta = target.as_secs_f64() - current.as_secs_f64();
+                seek_by(app, player, tx, delta as i32);
+            }
+        }
+        MediaCommand::SetVolume(volume) => {
+            let current = i16::from(app.status.volume);
+            let target = (volume.clamp(0.0, 1.0) * 100.0).round() as i16;
+            change_volume(app, player, tx, target - current);
+        }
+    }
 }
 
 /// Título deseado de la pestaña: pista en reproducción o nombre de la app.
@@ -124,10 +185,116 @@ fn set_tab_title(title: &str, last: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::ProviderKind;
 
     #[test]
     fn sanitize_title_drops_control_chars() {
         assert_eq!(sanitize_title("hola\u{1b}]mundo\n"), "hola]mundo");
         assert_eq!(sanitize_title("ShellMusic"), "ShellMusic");
+    }
+
+    struct MockPlayer;
+
+    #[async_trait::async_trait]
+    impl Player for MockPlayer {
+        async fn play(&self, _url: &str, _start: Option<Duration>) -> Result<()> {
+            Ok(())
+        }
+        async fn toggle_pause(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn stop(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn seek(&self, _seconds: i32) -> Result<()> {
+            Ok(())
+        }
+        async fn set_volume(&self, _volume: u8) -> Result<()> {
+            Ok(())
+        }
+        async fn status(&self) -> Result<crate::player::PlaybackStatus> {
+            Ok(crate::player::PlaybackStatus::default())
+        }
+    }
+
+    fn app_with_two_tracks() -> App {
+        let mut app = App::with_data_dir(
+            &Config::default(),
+            &std::env::temp_dir().join(format!(
+                "shellmusic-media-test-{}-{:016x}",
+                std::process::id(),
+                crate::state_file::random_suffix()
+            )),
+        )
+        .unwrap();
+        for id in ["a", "b"] {
+            app.queue.add(Track {
+                id: id.to_string(),
+                title: format!("título {id}"),
+                artist: "artista".to_string(),
+                duration: None,
+                source_url: format!("https://example.com/{id}"),
+                provider: ProviderKind::Youtube,
+            });
+        }
+        app.queue.current = Some(0);
+        app
+    }
+
+    #[tokio::test]
+    async fn media_next_and_previous_move_the_queue() {
+        let mut app = app_with_two_tracks();
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_media_command(&mut app, MediaCommand::Next, &player, &tx);
+        assert_eq!(app.queue.current, Some(1));
+        handle_media_command(&mut app, MediaCommand::Previous, &player, &tx);
+        assert_eq!(app.queue.current, Some(0));
+    }
+
+    #[tokio::test]
+    async fn media_stop_clears_current_track() {
+        let mut app = app_with_two_tracks();
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_media_command(&mut app, MediaCommand::Stop, &player, &tx);
+        assert_eq!(app.queue.current, None);
+        assert!(!app.playback_active);
+    }
+
+    #[tokio::test]
+    async fn media_set_volume_maps_fraction_to_percent() {
+        let mut app = app_with_two_tracks();
+        app.status.volume = 50;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_media_command(&mut app, MediaCommand::SetVolume(0.7), &player, &tx);
+        assert_eq!(app.status.volume, 70);
+        handle_media_command(&mut app, MediaCommand::SetVolume(2.0), &player, &tx);
+        assert_eq!(app.status.volume, 100, "se clama al 100");
+    }
+
+    #[tokio::test]
+    async fn media_set_position_seeks_relative_to_current() {
+        let mut app = app_with_two_tracks();
+        app.status.position = Some(Duration::from_secs(50));
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_media_command(
+            &mut app,
+            MediaCommand::SetPosition(Duration::from_secs(80)),
+            &player,
+            &tx,
+        );
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|m| m.text.contains("+30")),
+            "seek +30 esperado"
+        );
     }
 }

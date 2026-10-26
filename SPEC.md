@@ -102,6 +102,8 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-31 | La pestaña del terminal muestra «ShellMusic» en reposo y «♪ artista — título · ShellMusic» durante la reproducción (OSC 2); al salir se restablece el título del terminal. | Baja |
 | RF-32 | `X` exporta playlists y/o favoritos a JSON (menú con ámbito + ruta con `~`); en la vista de contenido de una playlist, `X` la exporta a M3U extendido. `I` importa según extensión: `.json` fusiona favoritos (dedupe) y playlists (nombre existente → merge de pistas, nuevo → se crea); `.m3u`/`.m3u8` crea una playlist con el nombre del archivo (URLs de YouTube extraen id; `#EXTINF` aporta título/artista/duración). Errores en la línea de estado, sin panic. | Media |
 | RF-33 | Estadísticas locales de escucha: cada arranque de pista incrementa su conteo en `stats.json` (mismo dir de datos, escritura atómica, corrupto → `.bak`). `t` abre el overlay «Tus más escuchadas»: top pistas por reproducciones (`Enter` reproduce, `a` encola) y top artistas (se alterna con `Tab`). | Media |
+| RF-34 | Notificación de escritorio al cambiar de pista (`notify-rust`, `[integrations] notifications`); el fallo de una notificación nunca se muestra en la UI ni interrumpe la app. | Media |
+| RF-35 | MPRIS en Linux (`souvlaki`, backend zbus): teclas multimedia, widgets del escritorio y KDE Connect controlan play/pausa, stop, siguiente/anterior, seek, posición y volumen; metadata (título, artista, duración) y estado de reproducción se publican al cambiar. Sin D-Bus de sesión (SSH/headless) la app arranca igualmente con un aviso. En macOS/Windows no hay media controls: exigen ventana/event loop de GUI, incompatibles con una TUI (limitación documentada). | Alta |
 
 ### Flujo de usuario principal
 
@@ -169,6 +171,7 @@ src/
 ├── session.rs         # cola persistente entre sesiones (persistencia JSON atómica)
 ├── stats.rs           # estadísticas de escucha (conteos por pista/artista)
 ├── portable.rs        # exportar/importar playlists y favoritos (JSON/M3U)
+├── system.rs          # integración con el SO: notificaciones y MPRIS (Linux)
 ├── theme.rs           # tema de color resuelto desde [theme] de la config
 ├── providers/
 │   ├── mod.rs         # trait MusicProvider + tipos Track + ProviderKind
@@ -302,6 +305,10 @@ highlight = "yellow"   # mensajes informativos y teclas en la ayuda
 error = "red"          # mensajes de error
 muted = "darkgray"     # línea de hints y texto secundario
 progress = "green"     # barra de progreso
+
+[integrations]
+notifications = true    # notificación de escritorio al cambiar de pista
+media_controls = true   # MPRIS en Linux: teclas multimedia, widgets, KDE Connect
 ```
 
 Los colores aceptan nombres (`cyan`, `lightred`, `darkgray`…), hex (`#rrggbb`) e índices de paleta (0-255); un valor inválido cae al color por defecto con un aviso en la línea de estado.
@@ -351,7 +358,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | 9.2 | Prefetch de radio: la expansión se dispara al empezar a sonar la última pista de la cola (antes: al agotarse), encolando la tanda siguiente en segundo plano sin interrumpir; al terminar la pista la siguiente entra sin pausa. Guardas: `radio_expanded_for` (no duplicar búsquedas ni martillear yt-dlp tras fallos) y `playback_active` (RadioDone solo auto-reproduce con el reproductor parado) — **completada** |
 | **10** | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists — **completada** |
 | 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
-| 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |
+| 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`, `[integrations] notifications`); MPRIS en Linux (`souvlaki` con backend zbus: teclas multimedia, widgets, KDE Connect; `[integrations] media_controls`). Media keys en Windows/macOS **descartadas**: requieren ventana (HWND) o event loop de GUI (AppDelegate), incompatibles con una TUI pura — **completada** |
 | 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") — **completada** (teclas `t`/`X`/`I`; `src/stats.rs`, `src/portable.rs`, overlay de estadísticas) |
 | **14** | Pulido: cola persistente entre sesiones (`session.json`: restaurar cola + pista + posición al arrancar, con reanudación vía `start` de mpv); temas de color configurables en `[theme]` de `config.toml`; título de la pestaña del terminal con la pista en reproducción (OSC 2) — **completada** |
 | **15** | Limpieza de la cola: con el modo radio la cola crece sin límite (~5 pistas por tanda). Al superar 500 pistas (`MAX_QUEUE` en `src/queue.rs`) se podan las ya reproducidas antes de encolar más, conservando las 20 anteriores a la actual (`KEEP_BEFORE_CURRENT`) para la navegación `p`; sin reproducción en curso o con la actual cerca del inicio no se poda — **completada** |
