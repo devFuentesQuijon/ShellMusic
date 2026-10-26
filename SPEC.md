@@ -362,7 +362,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 
 ## 9. Distribución
 
-- **MVP**: `cargo build --release` por plataforma; binario único `smusic` (instalable con `cargo install --path .`).
+- **MVP**: `cargo build --release` por plataforma; binario único `smusic` (instalable con `cargo install --path .`). Página de manual `docs/smusic.1` (se instala copiándola a `man1`; la futura fórmula Homebrew/scoop la incluirá).
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build, clippy (`-D warnings`) y tests en Linux, macOS y Windows en cada push/PR a `main`. En los tres SO se instala mpv (+ffmpeg donde hace falta) y corre el test de integración IPC local (`tests/mpv_ipc_local.rs`, sin red), lo que verifica la reproducción real — incluido el named pipe de Windows.
 - **Integración nocturna**: `.github/workflows/nightly.yml` corre a diario (04:23 UTC, también manual con `workflow_dispatch`) los tests que necesitan red: búsqueda real en YouTube (`tests/youtube_search.rs`), búsqueda real en SoundCloud (`tests/soundcloud_search.rs`) y detalle de error de mpv/yt-dlp (`tests/mpv_ipc.rs::mpv_reports_stderr_detail_on_failure`). Si falla una ejecución programada, se abre un issue automáticamente. Quedan excluidos a propósito los tests que requieren navegador con sesión de YouTube, reproducción real (el anti-bot bloquea IPs de datacenter) o stack de audio (PipeWire/PulseAudio).
 - **Releases**: al pushear un tag `v*` (`.github/workflows/release.yml`) se compilan y publican en GitHub Releases los binarios `smusic-linux-x86_64`, `smusic-macos-aarch64` y `smusic-windows-x86_64.exe`.

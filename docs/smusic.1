@@ -1,0 +1,97 @@
+.TH SMUSIC 1 "2026-10-26" "shellmusic 0.3.0" "User Commands"
+.SH NAME
+smusic \- reproductor de música con interfaz de terminal (YouTube Music y SoundCloud)
+.SH SYNOPSIS
+.B smusic
+.RI [ \-\-theme
+.IR nombre ]
+.RI [ \-\-play
+.IR búsqueda ]
+.RI [ \-h | \-\-help ]
+.SH DESCRIPTION
+.B ShellMusic
+es una TUI ultraliviana para buscar y reproducir música de YouTube Music y
+SoundCloud desde la terminal. La reproducción corre a cargo de
+.BR mpv (1)
+(controlado por JSON IPC) y la búsqueda/resolución de streams de
+.BR yt-dlp (1).
+.PP
+Al arrancar, la caja de búsqueda tiene el foco: escribe una consulta y pulsa
+Enter para buscar; navega los resultados con las flechas y reproduce con
+Enter. La barra inferior muestra la pista en curso, el progreso y los
+controles de estado. Pulsa
+.B ?
+dentro de la app para la ayuda contextual de atajos.
+.SH OPTIONS
+.TP
+.BI \-\-theme " nombre"
+Aplica un tema de color empaquetado solo en esta ejecución, con prioridad
+sobre el tema configurado. Nombres disponibles:
+.IR dracula ", " frankenstein ", " bride ", " wolfman ", " mummy ", "
+.IR invisible ", " lagoon ", " thriller .
+.TP
+.BI \-\-play " búsqueda"
+Busca al arrancar y reproduce automáticamente la primera coincidencia.
+.TP
+.BR \-h ", " \-\-help
+Muestra el uso y termina.
+.SH TECLAS PRINCIPALES
+.TS
+tab(@);
+l l.
+Tab / Shift+Tab@ciclar foco entre paneles
+Enter@reproducir selección
+a@añadir a la cola
+Espacio@play / pausa
+s@stop
+← / →@seek ∓5 s (con Shift: ∓30 s)
++ / \-@volumen
+n / p@siguiente / anterior
+l@repetición: off → cola → pista
+S@barajar la cola
+r / R@radio on/off · sub-modo
+f@favorito
+P@gestor de playlists
+t@estadísticas de escucha
+X / I@exportar / importar datos
+L@letra de la canción (lrclib.net)
+i@panel «sonando ahora» con carátula
+m@cambiar de proveedor
+?@ayuda contextual
+q@salir
+.TE
+.PP
+La lista completa, incluidos los overlays (playlists, letras, estadísticas),
+está en la ayuda contextual de la app y en
+.IR docs/atajos.md .
+.SH FILES
+.TP
+.I ~/.config/shellmusic/config.toml
+Configuración (se crea con valores por defecto en el primer arranque).
+En macOS: ~/Library/Application\ Support/shellmusic/config.toml;
+en Windows: %APPDATA%\\shellmusic\\config.toml.
+.TP
+.I ~/.local/share/shellmusic/
+Datos: session.json (cola persistente), favorites.json, playlists.json,
+history.json y stats.json. Escritura atómica; un archivo corrupto se aparta
+a .bak y se reempieza con lista vacía.
+.SH DEPENDENCIAS
+Requiere
+.BR mpv (1)
+y
+.BR yt-dlp (1)
+en el PATH. Al arrancar los verifica y, si falta alguno, muestra las
+instrucciones de instalación y sale con código distinto de cero (nunca
+panic).
+.SH EXIT STATUS
+0 si la app termina normalmente; distinto de 0 ante dependencias ausentes,
+argumentos inválidos o fallo de inicialización del terminal o de mpv.
+.SH PLATAFORMAS
+Linux, macOS y Windows. En Linux además: notificaciones de escritorio y
+controles multimedia MPRIS (teclas multimedia, widgets, KDE Connect).
+.SH SEE ALSO
+.BR mpv (1),
+.BR yt-dlp (1),
+.IR docs/ " (wiki: atajos, configuración, anti-bot, temas)".
+.SH LICENCIA
+MIT. Uso personal; ver docs/legal.md.

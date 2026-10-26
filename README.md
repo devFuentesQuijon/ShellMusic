@@ -69,6 +69,7 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 
 La guía completa vive en [`docs/`](docs/README.md):
 
+- **Manual**: `man smusic` — página de manual en `docs/smusic.1` (instalación: `sudo cp docs/smusic.1 /usr/local/share/man/man1/`)
 - [Atajos de teclado](docs/atajos.md) · [Cola, repetición y radio](docs/cola-y-radio.md) · [Playlists y favoritos](docs/playlists.md)
 - [Configuración y temas](docs/configuracion.md) · [Integración con el sistema](docs/integracion-sistema.md)
 - [Portabilidad y estadísticas](docs/portabilidad.md) · [Descubrimiento](docs/descubrimiento.md)
