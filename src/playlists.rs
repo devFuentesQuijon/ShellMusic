@@ -88,7 +88,9 @@ impl Playlists {
     /// la última huella conocida (otra instancia), se hace merge a 3 bandas
     /// contra la base, a nivel de playlist (por nombre) y de pista dentro de
     /// cada playlist: las adiciones de cualquier lado se conservan y las
-    /// eliminaciones de cualquier lado se respetan.
+    /// eliminaciones de cualquier lado se respetan. Si el archivo existe
+    /// pero no se puede releer, el guardado aborta en lugar de sobrescribir
+    /// a ciegas estado que puede contener cambios externos.
     pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
         use crate::state_file::{SaveLock, unique_tmp_path};
 
@@ -96,12 +98,24 @@ impl Playlists {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        if capture_fingerprint(path) != self.fingerprint
-            && let Ok(text) = fs::read_to_string(path)
-            && let Ok(file) = serde_json::from_str::<PlaylistsFile>(&text)
-            && file.version == VERSION
-        {
-            self.merge_external(file.playlists);
+        let changed = capture_fingerprint(path) != self.fingerprint
+            // Huella vacía en ambos lados pero archivo presente: apareció
+            // entre carga y guardado y no se ha podido leer (error, no ausencia).
+            || (self.fingerprint.is_none() && path.exists());
+        if changed {
+            match fs::read_to_string(path) {
+                Ok(text) => {
+                    if let Ok(file) = serde_json::from_str::<PlaylistsFile>(&text)
+                        && file.version == VERSION
+                    {
+                        self.merge_external(file.playlists);
+                    }
+                }
+                // Borrado externo: el guardado lo recrea con el estado en memoria.
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                // Existe pero ilegible: no sobrescribir sin conocer su contenido.
+                Err(err) => return Err(err),
+            }
         }
         let file = PlaylistsFile {
             version: VERSION,
@@ -443,5 +457,34 @@ mod tests {
         assert!(loaded.items.is_empty());
         assert!(warning.is_some());
         let _ = fs::remove_file(path.with_extension("json.bak"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_aborts_when_file_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = temp_path("ilegible.json");
+        let mut playlists = Playlists::default();
+        let pl = playlists.create("mix").unwrap();
+        playlists.add_track(pl, track("a"));
+        playlists.save(&path).unwrap();
+
+        // Otra instancia guarda cambios; después el archivo vuelve ilegible.
+        let (mut other, _) = Playlists::load(&path).unwrap();
+        other.add_track(0, track("externa"));
+        other.save(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        // Este guardado no debe sobrescribir estado que no ha podido releer.
+        playlists.add_track(pl, track("b"));
+        assert!(playlists.save(&path).is_err());
+
+        // Al restaurar permisos, el contenido externo sigue intacto.
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let (loaded, _) = Playlists::load(&path).unwrap();
+        let ids: Vec<&str> = loaded.items[0].tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "externa"]);
+        let _ = fs::remove_file(&path);
     }
 }
