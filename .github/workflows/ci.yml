@@ -38,6 +38,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y mpv ffmpeg
 
+      - name: Instalar mpv (macOS; ffmpeg viene como dependencia)
+        if: runner.os == 'macOS'
+        run: brew install mpv
+
+      - name: Instalar mpv y ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install mpv ffmpeg -y --no-progress
+
       - name: Test de integración IPC de mpv (archivo local, sin red)
-        if: runner.os == 'Linux'
         run: cargo test --locked --test mpv_ipc_local -- --ignored --nocapture

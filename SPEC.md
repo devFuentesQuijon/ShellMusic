@@ -53,9 +53,11 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 
 | SO | Estado MVP | Notas |
 |---|---|---|
-| Linux (x86_64) | Soportado, plataforma de desarrollo | Entorno verificado: Rust 1.92, mpv 0.37, yt-dlp 2026.08 |
-| macOS (Intel/ARM) | Soportado | mpv y yt-dlp vía Homebrew; IPC por socket Unix |
-| Windows (10/11) | Soportado | IPC de mpv por named pipe (abstracción por SO en el cliente IPC); se requiere Windows Terminal o similar para mejor experiencia |
+| Linux (x86_64) | Soportado, plataforma de desarrollo | Entorno verificado: Rust 1.92, mpv 0.37, yt-dlp 2026.08. Todo verificado localmente, incluido MPRIS |
+| macOS (Intel/ARM) | Soportado | mpv y yt-dlp vía Homebrew; IPC por socket Unix. Verificado en CI: build + reproducción local (sin red). Media controls: no (requieren AppDelegate de GUI) |
+| Windows (10/11) | Soportado | IPC de mpv por named pipe (abstracción por SO en el cliente IPC); se requiere Windows Terminal o similar para mejor experiencia. Verificado en CI: build + reproducción local (sin red). Media controls: no (requieren HWND de ventana). Carátula: halfblocks |
+
+La reproducción con red (streams de YouTube/SoundCloud) no es verificable en CI en ningún SO: el anti-bot de YouTube bloquea IPs de datacenter. Esa verificación es manual/local.
 
 ### Rutas de configuración por SO (crate `dirs`)
 
@@ -342,7 +344,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 ## 9. Distribución
 
 - **MVP**: `cargo build --release` por plataforma; binario único `smusic` (instalable con `cargo install --path .`).
-- **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build, clippy (`-D warnings`) y tests en Linux, macOS y Windows en cada push/PR a `main`. En Linux se instalan además mpv+ffmpeg y corre el test de integración IPC local (`tests/mpv_ipc_local.rs`, sin red).
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build, clippy (`-D warnings`) y tests en Linux, macOS y Windows en cada push/PR a `main`. En los tres SO se instala mpv (+ffmpeg donde hace falta) y corre el test de integración IPC local (`tests/mpv_ipc_local.rs`, sin red), lo que verifica la reproducción real — incluido el named pipe de Windows.
 - **Integración nocturna**: `.github/workflows/nightly.yml` corre a diario (04:23 UTC, también manual con `workflow_dispatch`) los tests que necesitan red: búsqueda real en YouTube (`tests/youtube_search.rs`), búsqueda real en SoundCloud (`tests/soundcloud_search.rs`) y detalle de error de mpv/yt-dlp (`tests/mpv_ipc.rs::mpv_reports_stderr_detail_on_failure`). Si falla una ejecución programada, se abre un issue automáticamente. Quedan excluidos a propósito los tests que requieren navegador con sesión de YouTube, reproducción real (el anti-bot bloquea IPs de datacenter) o stack de audio (PipeWire/PulseAudio).
 - **Releases**: al pushear un tag `v*` (`.github/workflows/release.yml`) se compilan y publican en GitHub Releases los binarios `smusic-linux-x86_64`, `smusic-macos-aarch64` y `smusic-windows-x86_64.exe`.
 - **Futuro**: publicación en gestores de paquetes. Los metadatos de crates.io ya están en `Cargo.toml` (`repository`, `homepage`, `readme`, `keywords`, `categories`, `exclude` de docs/scripts/CI) y `cargo package --list` produce un paquete limpio; quedan como pasos manuales del autor: `cargo publish` (requiere cuenta en crates.io), fórmula Homebrew (tap propio o PR a homebrew-core) y manifiesto scoop (bucket propio o PR a ScoopInstaller/Extras).
