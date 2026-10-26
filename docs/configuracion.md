@@ -38,6 +38,7 @@ media_controls = true   # MPRIS en Linux; ver «Integración con el sistema»
 
 - Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
 - Los colores aceptan nombres (`cyan`, `lightred`, `darkgray`…), hex (`#rrggbb`) e índices de paleta (0-255); un valor inválido usa el color por defecto y avisa en la línea de estado.
+- Hay una [colección de temas listos para copiar](temas.md) (incluida una temática de monstruos clásicos para Halloween).
 - El detalle de `[youtube]` (anti-bot) está en [Bloqueo anti-bot de YouTube](anti-bot.md).
 
 ## Temas
