@@ -190,6 +190,10 @@ pub(super) fn play_queue_track_from(
         &app.queue.tracks[index].title,
         &app.queue.tracks[index].artist,
     ));
+    // Estadísticas de escucha: cada arranque de pista cuenta.
+    app.stats.record(&app.queue.tracks[index]);
+    app.refresh_stats_view();
+    app.save_stats();
     app.queue_select(index);
     app.message = Some(Message::info(format!(
         "cargando «{}»…",

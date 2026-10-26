@@ -53,6 +53,8 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("m", "cambiar proveedor"),
             ("r / R", "radio on/off · sub-modo"),
             ("P", "gestor de playlists"),
+            ("t", "estadísticas de escucha"),
+            ("X / I", "exportar / importar datos"),
             ("?", "esta ayuda"),
             ("q / Ctrl+C", "salir"),
         ],

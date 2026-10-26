@@ -17,7 +17,7 @@ mod input;
 mod playback;
 mod state;
 
-pub use state::{App, Focus, Message, NameContext, Overlay, RadioMode, RepeatMode};
+pub use state::{App, Focus, Message, NameContext, Overlay, PathAction, RadioMode, RepeatMode};
 
 use input::handle_key;
 use playback::{autoplay_next, handle_msg, play_queue_track_from};

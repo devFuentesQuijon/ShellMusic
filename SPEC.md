@@ -100,6 +100,8 @@ Al arrancar, ShellMusic verifica que ambos ejecutables existen en el `PATH`. Si 
 | RF-29 | Cola persistente entre sesiones: al salir y en cada cambio de pista se guarda `session.json` (pistas, pista en curso y posición) en el dir de datos, con escritura atómica y corrupto → `.bak` + aviso; al arrancar se restaura la cola y se reanuda la pista desde la posición guardada. | Media |
 | RF-30 | Temas de color en `[theme]` de `config.toml` (roles `accent`, `highlight`, `error`, `muted`, `progress`; nombres, `#rrggbb` o índice 0-255); valor inválido → color por defecto con aviso en la línea de estado, sin panic. | Baja |
 | RF-31 | La pestaña del terminal muestra «ShellMusic» en reposo y «♪ artista — título · ShellMusic» durante la reproducción (OSC 2); al salir se restablece el título del terminal. | Baja |
+| RF-32 | `X` exporta playlists y/o favoritos a JSON (menú con ámbito + ruta con `~`); en la vista de contenido de una playlist, `X` la exporta a M3U extendido. `I` importa según extensión: `.json` fusiona favoritos (dedupe) y playlists (nombre existente → merge de pistas, nuevo → se crea); `.m3u`/`.m3u8` crea una playlist con el nombre del archivo (URLs de YouTube extraen id; `#EXTINF` aporta título/artista/duración). Errores en la línea de estado, sin panic. | Media |
+| RF-33 | Estadísticas locales de escucha: cada arranque de pista incrementa su conteo en `stats.json` (mismo dir de datos, escritura atómica, corrupto → `.bak`). `t` abre el overlay «Tus más escuchadas»: top pistas por reproducciones (`Enter` reproduce, `a` encola) y top artistas (se alterna con `Tab`). | Media |
 
 ### Flujo de usuario principal
 
@@ -165,6 +167,8 @@ src/
 ├── playlists.rs       # playlists locales (persistencia JSON atómica)
 ├── browsers.rs        # detección de navegadores instalados (cookies anti-bot)
 ├── session.rs         # cola persistente entre sesiones (persistencia JSON atómica)
+├── stats.rs           # estadísticas de escucha (conteos por pista/artista)
+├── portable.rs        # exportar/importar playlists y favoritos (JSON/M3U)
 ├── theme.rs           # tema de color resuelto desde [theme] de la config
 ├── providers/
 │   ├── mod.rs         # trait MusicProvider + tipos Track + ProviderKind
@@ -180,6 +184,7 @@ src/
     ├── queue.rs       # panel de cola de reproducción
     ├── favorites.rs   # panel de favoritos
     ├── playlists.rs   # overlay modal de playlists
+    ├── stats.rs       # overlay de estadísticas («tus más escuchadas») y exportar/importar
     ├── help.rs        # overlay modal de ayuda de atajos (tecla ?)
     └── player_bar.rs  # progreso, volumen, track actual, posición en cola, repetición
 ```
@@ -255,6 +260,9 @@ pub trait Player: Send + Sync {
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay modal) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (cicla los habilitados en `[general] providers`) |
+| t | Resultados / Cola / Favoritos | Overlay «Tus más escuchadas» (estadísticas; `Tab` alterna pistas/artistas, `Enter` reproduce, `a` encola, `Esc` cierra) |
+| X | Resultados / Cola / Favoritos | Exportar playlists/favoritos a JSON (menú de ámbito + ruta); en contenido de playlist: exportarla a M3U |
+| I | Resultados / Cola / Favoritos | Importar desde `.json` (fusiona) o `.m3u`/`.m3u8` (crea playlist) |
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio (al empezar la última pista de la cola, encola pistas relacionadas por adelantado) |
 | R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares (mix RD de YouTube) → random (artista al azar de favoritos) → random género (palabra clave al azar) → rarezas (deep cuts del artista) |
 | n / d / Enter / Esc | Overlay: lista de playlists | Nueva / eliminar (d dos veces) / abrir contenido / cerrar |
@@ -344,7 +352,7 @@ Las claves ausentes en un `config.toml` preexistente toman su valor por defecto 
 | **10** | Navegación en listas largas: `PageUp`/`PageDown` y `g`/`G` en Resultados, Cola, Favoritos y playlists — **completada** |
 | 11 | Descubrimiento: autocompletado de la búsqueda a partir del historial local; overlay de letras (API lrclib.net); panel "sonando ahora" con metadatos ampliados y carátula (kitty/sixel vía `ratatui-image`) |
 | 12 | Integración con el sistema: notificaciones de escritorio al cambiar de pista (`notify-rust`); MPRIS en Linux (`mpris-server`: teclas multimedia, widgets, KDE Connect); media keys globales en Windows/macOS |
-| 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") |
+| 13 | Datos y portabilidad: exportar/importar playlists y favoritos (JSON/M3U); estadísticas locales de escucha (conteos, artistas más oídos, vista "tus más escuchadas") — **completada** (teclas `t`/`X`/`I`; `src/stats.rs`, `src/portable.rs`, overlay de estadísticas) |
 | **14** | Pulido: cola persistente entre sesiones (`session.json`: restaurar cola + pista + posición al arrancar, con reanudación vía `start` de mpv); temas de color configurables en `[theme]` de `config.toml`; título de la pestaña del terminal con la pista en reproducción (OSC 2) — **completada** |
 | **15** | Limpieza de la cola: con el modo radio la cola crece sin límite (~5 pistas por tanda). Al superar 500 pistas (`MAX_QUEUE` en `src/queue.rs`) se podan las ya reproducidas antes de encolar más, conservando las 20 anteriores a la actual (`KEEP_BEFORE_CURRENT`) para la navegación `p`; sin reproducción en curso o con la actual cerca del inicio no se poda — **completada** |
 

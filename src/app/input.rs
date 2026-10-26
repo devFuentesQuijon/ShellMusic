@@ -13,7 +13,7 @@ use super::playback::{
     radio_prefetch, remove_from_queue, seek_by, shuffle_queue, spawn_player, submit_search,
     toggle_favorite,
 };
-use super::state::{App, Focus, Message, NameContext, Overlay};
+use super::state::{App, Focus, Message, NameContext, Overlay, PathAction};
 
 const VOLUME_STEP: i16 = 5;
 const SEEK_STEP: i32 = 5;
@@ -266,6 +266,15 @@ fn playback_key(
             }
         }
         KeyCode::Char('m') => app.next_provider(),
+        KeyCode::Char('t') => app.open_stats(),
+        KeyCode::Char('X') => {
+            app.overlay = Overlay::Export;
+            app.overlay_list_state.select(Some(0));
+        }
+        KeyCode::Char('I') => {
+            app.overlay_input.clear();
+            app.overlay = Overlay::PathInput(PathAction::Import);
+        }
         KeyCode::Char('r') => {
             app.toggle_radio();
             // Si suena la última pista de la cola, prefetch inmediato.
@@ -313,6 +322,126 @@ fn handle_overlay_key(
             KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter => app.overlay = Overlay::Closed,
             _ => {}
         },
+        Overlay::Stats => overlay_stats_key(app, key, player, tx),
+        Overlay::Export => overlay_export_key(app, key),
+        Overlay::PathInput(action) => overlay_path_key(app, key, &action),
+    }
+}
+
+/// Overlay de estadísticas: pistas más escuchadas / artistas más oídos.
+fn overlay_stats_key(
+    app: &mut App,
+    key: KeyEvent,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
+    let len = if app.stats_by_artist {
+        app.stats.top_artists().len()
+    } else {
+        app.stats_top.len()
+    };
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('t') => app.overlay = Overlay::Closed,
+        KeyCode::Tab => {
+            app.stats_by_artist = !app.stats_by_artist;
+            app.stats_state.select(if len > 0 { Some(0) } else { None });
+        }
+        KeyCode::Enter => {
+            if !app.stats_by_artist
+                && let Some(index) = app.stats_state.selected()
+                && let Some(track) = app.stats_top.get(index).cloned()
+                && !track.source_url.is_empty()
+            {
+                app.overlay = Overlay::Closed;
+                app.queue.prune_played();
+                let queue_index = app.queue.add(track);
+                play_queue_track(app, player, tx, queue_index);
+            }
+        }
+        KeyCode::Char('a') => {
+            if !app.stats_by_artist
+                && let Some(index) = app.stats_state.selected()
+                && let Some(track) = app.stats_top.get(index).cloned()
+                && !track.source_url.is_empty()
+            {
+                add_to_queue(app, track);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(index) = app.stats_state.selected() {
+                app.stats_select(index.saturating_sub(1));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(index) = app.stats_state.selected() {
+                app.stats_select(index + 1);
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(index) = app.stats_state.selected() {
+                app.stats_select(index.saturating_sub(app.overlay_page_size));
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(index) = app.stats_state.selected() {
+                app.stats_select(index.saturating_add(app.overlay_page_size));
+            }
+        }
+        KeyCode::Char('g') => app.stats_select(0),
+        KeyCode::Char('G') => app.stats_select(usize::MAX),
+        _ => {}
+    }
+}
+
+/// Menú de exportación JSON: elige el ámbito y pide la ruta.
+fn overlay_export_key(app: &mut App, key: KeyEvent) {
+    use crate::portable::ExportScope;
+    const SCOPES: [ExportScope; 3] = [
+        ExportScope::All,
+        ExportScope::Playlists,
+        ExportScope::Favorites,
+    ];
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('X') => app.overlay = Overlay::Closed,
+        KeyCode::Enter => {
+            if let Some(index) = app.overlay_list_state.selected()
+                && let Some(scope) = SCOPES.get(index)
+            {
+                app.overlay_input = "~/shellmusic-backup.json".to_string();
+                app.overlay = Overlay::PathInput(PathAction::ExportJson(*scope));
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(index) = app.overlay_list_state.selected() {
+                app.overlay_list_state.select(Some(index.saturating_sub(1)));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(index) = app.overlay_list_state.selected() {
+                app.overlay_list_state
+                    .select(Some((index + 1).min(SCOPES.len() - 1)));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Input de ruta para exportar o importar (edición como overlay_name_key).
+fn overlay_path_key(app: &mut App, key: KeyEvent, action: &PathAction) {
+    match key.code {
+        KeyCode::Esc => {
+            app.overlay = match action {
+                PathAction::ExportJson(_) => Overlay::Export,
+                PathAction::ExportM3u(playlist) => Overlay::Content(*playlist),
+                PathAction::Import => Overlay::Closed,
+            };
+        }
+        KeyCode::Enter => app.run_path_action(action),
+        KeyCode::Backspace => {
+            app.overlay_input.pop();
+        }
+        KeyCode::Char(c) => app.overlay_input.push(c),
+        _ => {}
     }
 }
 
@@ -440,6 +569,14 @@ fn overlay_content_key(
                 )));
                 app.save_playlists();
                 app.overlay_content_select(playlist, index);
+            }
+        }
+        // Exportar esta playlist a M3U.
+        KeyCode::Char('X') => {
+            if let Some(pl) = app.playlists.items.get(playlist) {
+                app.overlay_input =
+                    format!("~/{}.m3u", crate::portable::sanitize_filename(&pl.name));
+                app.overlay = Overlay::PathInput(PathAction::ExportM3u(playlist));
             }
         }
         KeyCode::Char('J') => {

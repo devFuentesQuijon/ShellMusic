@@ -7,8 +7,12 @@ use super::fmt_duration;
 use crate::app::{App, NameContext, Overlay};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    // El overlay de ayuda lo dibuja su propio módulo.
-    if matches!(app.overlay, Overlay::Closed | Overlay::Help) {
+    // Los overlays de ayuda, estadísticas y exportación los dibujan sus
+    // propios módulos.
+    if !matches!(
+        app.overlay,
+        Overlay::List | Overlay::Content(_) | Overlay::NameInput(_) | Overlay::Pick(_)
+    ) {
         return;
     }
     let area = centered(frame.area(), 60, 60);
@@ -16,11 +20,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     app.overlay_page_size = area.height.saturating_sub(2).max(1) as usize;
     frame.render_widget(Clear, area);
     match app.overlay.clone() {
-        Overlay::Closed | Overlay::Help => {}
         Overlay::List => draw_list(frame, app, area),
         Overlay::Content(playlist) => draw_content(frame, app, area, playlist),
         Overlay::NameInput(context) => draw_name_input(frame, app, area, &context),
         Overlay::Pick(track) => draw_pick(frame, app, area, &track),
+        _ => {}
     }
 }
 

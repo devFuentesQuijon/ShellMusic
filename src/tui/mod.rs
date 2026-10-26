@@ -4,6 +4,7 @@ pub mod player_bar;
 pub mod playlists;
 pub mod queue;
 pub mod search;
+pub mod stats;
 
 use std::time::Duration;
 
@@ -48,6 +49,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     player_bar::draw(frame, app, player_area);
     playlists::draw(frame, app);
     help::draw(frame, app);
+    stats::draw(frame, app);
+    stats::draw_export(frame, app);
+    stats::draw_path_input(frame, app);
 }
 
 fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -63,6 +67,8 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     Focus::Favorites => HELP_FAVORITES,
                 },
                 Overlay::Help => "ayuda: Esc cierra",
+                Overlay::Stats => "estadísticas: Tab vista · Enter reproducir · Esc cierra",
+                Overlay::Export | Overlay::PathInput(_) => "exportar/importar: Enter confirmar · Esc cancelar",
                 _ => "playlists: las teclas se muestran dentro del panel",
             }
             .to_string(),

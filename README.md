@@ -25,6 +25,8 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Repetición** off / toda la cola / pista actual (`l`) y **seek** de ±5 s o ±30 s (`←`/`→`).
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube.
 - **Historial de búsquedas** navegable con `↑`/`↓`, como en un shell.
+- **Estadísticas de escucha** (`t`): tus pistas y artistas más escuchados, con reproducción directa desde el ranking.
+- **Portabilidad** (`X`/`I`): exporta playlists y favoritos a JSON o M3U e impórtalos en otro equipo.
 - **Ayuda contextual** de atajos con `?`.
 - **Caché en memoria** de búsquedas y mitigación del bloqueo anti-bot de YouTube (cookies del navegador solo cuando hacen falta; nunca salen de tu equipo).
 - Binario único para Linux, macOS y Windows.
@@ -91,6 +93,9 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (YouTube / SoundCloud) |
+| t | Resultados / Cola / Favoritos | Estadísticas de escucha (overlay; Tab alterna pistas/artistas) |
+| X | Resultados / Cola / Favoritos | Exportar playlists/favoritos a JSON (en una playlist: a M3U) |
+| I | Resultados / Cola / Favoritos | Importar desde `.json` o `.m3u` |
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio |
 | R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares → random → random género → rarezas |
 | Ctrl+C | Global | Salir |
@@ -209,6 +214,14 @@ Con `r` activas el modo radio (estado inicial configurable en `[radio] enabled`;
 - **rarezas**: pistas menos conocidas del último artista (descarta los primeros hits y baraja el resto).
 
 En todos los modos se excluyen las pistas ya reproducidas o encoladas, y no entran dos versiones de la misma canción (dedupe por título normalizado). Si no hay nada nuevo, la reproducción se detiene al agotarse la cola con un aviso. El modo inicial se configura con `[radio] mode`.
+
+## Portabilidad y estadísticas
+
+**Exportar** (`X` desde Resultados/Cola/Favoritos): menú para volcar playlists + favoritos, solo playlists o solo favoritos a un JSON (la ruta admite `~`). En la vista de contenido de una playlist (`P` → `Enter`), `X` la exporta a **M3U extendido** (`#EXTINF` con duración y «artista - título»).
+
+**Importar** (`I`): por extensión — `.json` fusiona sin duplicados (favoritos por pista, playlists por nombre con merge de pistas), `.m3u`/`.m3u8` crea una playlist con el nombre del archivo; las URLs de YouTube (`watch?v=` / `youtu.be/`) recuperan su id.
+
+**Estadísticas** (`t`): cada pista que arranca cuenta una reproducción en `stats.json` (mismo directorio de datos, escritura atómica). El overlay «Tus más escuchadas» muestra el ranking de pistas (`Enter` reproduce, `a` encola) y, con `Tab`, el de artistas.
 
 ## Bloqueo anti-bot de YouTube
 

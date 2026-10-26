@@ -13,6 +13,7 @@ use crate::providers::youtube::YoutubeProvider;
 use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::queue::Queue;
 use crate::session::Session;
+use crate::stats::Stats;
 use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +160,7 @@ impl std::fmt::Display for RepeatMode {
     }
 }
 
-/// Estado del overlay modal de playlists.
+/// Estado del overlay modal.
 #[derive(Debug, Clone)]
 pub enum Overlay {
     Closed,
@@ -173,6 +174,23 @@ pub enum Overlay {
     Pick(Track),
     /// Ayuda contextual de atajos de teclado.
     Help,
+    /// Estadísticas de escucha ("tus más escuchadas").
+    Stats,
+    /// Menú de exportación JSON (qué incluir).
+    Export,
+    /// Input de ruta para exportar o importar.
+    PathInput(PathAction),
+}
+
+/// Acción que ejecuta `Overlay::PathInput` al confirmar la ruta.
+#[derive(Debug, Clone)]
+pub enum PathAction {
+    /// Copia de seguridad JSON con el ámbito elegido.
+    ExportJson(crate::portable::ExportScope),
+    /// Exportar la playlist con ese índice a M3U.
+    ExportM3u(usize),
+    /// Importar desde JSON o M3U según la extensión.
+    Import,
 }
 
 #[derive(Debug, Clone)]
@@ -239,6 +257,14 @@ pub struct App {
     /// bajar más allá de la búsqueda más reciente.
     history_draft: String,
     history_path: std::path::PathBuf,
+    pub stats: Stats,
+    stats_path: std::path::PathBuf,
+    /// Vista del overlay de estadísticas: false = pistas, true = artistas.
+    pub stats_by_artist: bool,
+    /// Selección dentro del overlay de estadísticas.
+    pub stats_state: ListState,
+    /// Cache de la vista pistas ordenada (índice → pista) para Enter/a.
+    pub stats_top: Vec<Track>,
 }
 
 impl App {
@@ -254,6 +280,7 @@ impl App {
         let playlists_path = data_dir.join("playlists.json");
         let history_path = data_dir.join("history.json");
         let session_path = data_dir.join("session.json");
+        let stats_path = data_dir.join("stats.json");
         let (favorites, fav_warning) = Favorites::load(&favorites_path)
             .with_context(|| format!("no se pudieron leer {}", favorites_path.display()))?;
         let (playlists, pl_warning) = Playlists::load(&playlists_path)
@@ -262,6 +289,8 @@ impl App {
             .with_context(|| format!("no se pudo leer {}", history_path.display()))?;
         let (session, sess_warning) = Session::load(&session_path)
             .with_context(|| format!("no se pudo leer {}", session_path.display()))?;
+        let (stats, stats_warning) = Stats::load(&stats_path)
+            .with_context(|| format!("no se pudieron leer {}", stats_path.display()))?;
         let (theme, theme_warning) = Theme::resolve(&config.theme);
         let mut app = Self {
             focus: Focus::Searching,
@@ -288,6 +317,7 @@ impl App {
                 .or(pl_warning)
                 .or(hist_warning)
                 .or(sess_warning)
+                .or(stats_warning)
                 .or(theme_warning)
                 .map(Message::error),
             searching: false,
@@ -312,6 +342,11 @@ impl App {
             history_index: None,
             history_draft: String::new(),
             history_path,
+            stats,
+            stats_path,
+            stats_by_artist: false,
+            stats_state: ListState::default(),
+            stats_top: Vec::new(),
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));
@@ -500,6 +535,199 @@ impl App {
             )));
         }
     }
+
+    pub fn save_stats(&mut self) {
+        if let Err(err) = self.stats.save(&self.stats_path) {
+            self.message = Some(Message::error(format!(
+                "no se pudieron guardar las estadísticas: {err}"
+            )));
+        }
+    }
+
+    /// Abre el overlay de estadísticas con la vista de pistas ordenada.
+    pub fn open_stats(&mut self) {
+        self.refresh_stats_view();
+        self.overlay = Overlay::Stats;
+        if self.stats_state.selected().is_none() && !self.stats_top.is_empty() {
+            self.stats_state.select(Some(0));
+        }
+    }
+
+    /// Reordena la vista de pistas por reproducciones (tras abrir o grabar).
+    pub fn refresh_stats_view(&mut self) {
+        self.stats_top = self
+            .stats
+            .top_tracks()
+            .into_iter()
+            .map(|(_, track)| track)
+            .collect();
+    }
+
+    pub fn stats_select(&mut self, index: usize) {
+        let len = if self.stats_by_artist {
+            self.stats.top_artists().len()
+        } else {
+            self.stats_top.len()
+        };
+        if len > 0 {
+            self.stats_state.select(Some(index.min(len - 1)));
+        }
+    }
+
+    /// Ejecuta la acción de la ruta confirmada en el overlay PathInput.
+    pub fn run_path_action(&mut self, action: &PathAction) {
+        let input = self.overlay_input.clone();
+        let path = match crate::portable::expand_path(&input) {
+            Ok(path) => path,
+            Err(err) => {
+                self.message = Some(Message::error(err));
+                return;
+            }
+        };
+        match action {
+            PathAction::ExportJson(scope) => {
+                let text =
+                    crate::portable::export_json(*scope, &self.favorites.tracks, &self.playlists.items);
+                match crate::portable::write_export(&path, &text) {
+                    Ok(()) => {
+                        self.message =
+                            Some(Message::info(format!("exportado a {}", path.display())));
+                        self.overlay = Overlay::Closed;
+                    }
+                    Err(err) => {
+                        self.message = Some(Message::error(format!(
+                            "no se pudo exportar: {err}"
+                        )));
+                    }
+                }
+            }
+            PathAction::ExportM3u(playlist) => {
+                let Some(playlist) = self.playlists.items.get(*playlist) else {
+                    self.message = Some(Message::error("la playlist ya no existe"));
+                    self.overlay = Overlay::Closed;
+                    return;
+                };
+                let text = crate::portable::export_m3u(playlist);
+                match crate::portable::write_export(&path, &text) {
+                    Ok(()) => {
+                        self.message =
+                            Some(Message::info(format!("exportado a {}", path.display())));
+                        self.overlay = Overlay::Content(self.playlist_index_of(playlist));
+                    }
+                    Err(err) => {
+                        self.message = Some(Message::error(format!(
+                            "no se pudo exportar: {err}"
+                        )));
+                    }
+                }
+            }
+            PathAction::Import => self.import_path(&path),
+        }
+    }
+
+    fn playlist_index_of(&self, playlist: &crate::playlists::Playlist) -> usize {
+        self.playlists
+            .items
+            .iter()
+            .position(|p| p.name == playlist.name)
+            .unwrap_or(0)
+    }
+
+    fn import_path(&mut self, path: &std::path::Path) {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) => {
+                self.message = Some(Message::error(format!(
+                    "no se pudo leer {}: {err}",
+                    path.display()
+                )));
+                return;
+            }
+        };
+        let result = if ext == "m3u" || ext == "m3u8" {
+            self.import_m3u_text(path, &text)
+        } else {
+            self.import_json_text(&text)
+        };
+        match result {
+            Ok(summary) => {
+                self.message = Some(Message::info(summary));
+                self.overlay = Overlay::Closed;
+            }
+            Err(err) => self.message = Some(Message::error(err)),
+        }
+    }
+
+    fn import_json_text(&mut self, text: &str) -> Result<String, String> {
+        let file = crate::portable::import_json(text)?;
+        let mut favs = 0;
+        for track in file.favorites {
+            if self.favorites.add(track) {
+                favs += 1;
+            }
+        }
+        let mut playlists_new = 0;
+        let mut tracks_new = 0;
+        for playlist in file.playlists {
+            match self
+                .playlists
+                .items
+                .iter()
+                .position(|p| p.name == playlist.name)
+            {
+                Some(index) => {
+                    for track in playlist.tracks {
+                        if self.playlists.add_track(index, track) {
+                            tracks_new += 1;
+                        }
+                    }
+                }
+                None => {
+                    playlists_new += 1;
+                    self.playlists.items.push(playlist);
+                }
+            }
+        }
+        if favs > 0 {
+            self.save_favorites();
+        }
+        if playlists_new > 0 || tracks_new > 0 {
+            self.save_playlists();
+        }
+        Ok(format!(
+            "importado: {favs} favoritos, {playlists_new} playlists nuevas, {tracks_new} pistas añadidas"
+        ))
+    }
+
+    fn import_m3u_text(&mut self, path: &std::path::Path, text: &str) -> Result<String, String> {
+        let tracks = crate::portable::import_m3u(text)?;
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("importada");
+        let index = match self
+            .playlists
+            .items
+            .iter()
+            .position(|p| p.name == name)
+        {
+            Some(index) => index,
+            None => self.playlists.create(name)?,
+        };
+        let mut added = 0;
+        for track in tracks {
+            if self.playlists.add_track(index, track) {
+                added += 1;
+            }
+        }
+        self.save_playlists();
+        Ok(format!("importado: {added} pistas en «{name}»"))
+    }
 }
 
 #[cfg(test)]
@@ -549,6 +777,65 @@ mod tests {
         app.history_prev();
         app.history_next();
         assert_eq!(app.input, "texto");
+    }
+
+    #[test]
+    fn import_json_merges_without_duplicates() {
+        let mut app = App::with_data_dir(
+            &Config::default(),
+            &std::env::temp_dir().join(format!(
+                "shellmusic-import-json-{}-{:016x}",
+                std::process::id(),
+                crate::state_file::random_suffix()
+            )),
+        )
+        .unwrap();
+        let track = Track {
+            id: "a".to_string(),
+            title: "título a".to_string(),
+            artist: "artista".to_string(),
+            duration: None,
+            source_url: "https://example.com/a".to_string(),
+            provider: ProviderKind::Youtube,
+        };
+        app.favorites.add(track.clone());
+        let pl = app.playlists.create("mix").unwrap();
+        app.playlists.add_track(pl, track.clone());
+
+        // La copia trae el mismo favorito, la misma pista en «mix» y una
+        // playlist nueva: nada se duplica.
+        let text = format!(
+            "{{\"version\": 1, \"favorites\": [{}], \"playlists\": [{{\"name\": \"mix\", \"tracks\": [{}]}}, {{\"name\": \"nueva\", \"tracks\": [{}]}}]}}",
+            serde_json::to_string(&track).unwrap(),
+            serde_json::to_string(&track).unwrap(),
+            serde_json::to_string(&track).unwrap(),
+        );
+        let summary = app.import_json_text(&text).unwrap();
+        assert!(summary.contains("0 favoritos"), "{summary}");
+        assert_eq!(app.favorites.tracks.len(), 1);
+        assert_eq!(app.playlists.items.len(), 2);
+        let mix = app.playlists.items.iter().find(|p| p.name == "mix").unwrap();
+        assert_eq!(mix.tracks.len(), 1, "sin pista duplicada en la merge");
+    }
+
+    #[test]
+    fn import_m3u_text_creates_playlist() {
+        let mut app = App::with_data_dir(
+            &Config::default(),
+            &std::env::temp_dir().join(format!(
+                "shellmusic-import-m3u-{}-{:016x}",
+                std::process::id(),
+                crate::state_file::random_suffix()
+            )),
+        )
+        .unwrap();
+        let text = "#EXTM3U\n#EXTINF:200,artista - canción\nhttps://www.youtube.com/watch?v=abc123\n";
+        let path = std::path::Path::new("/tmp/mi mix.m3u");
+        let summary = app.import_m3u_text(path, text).unwrap();
+        assert!(summary.contains("1 pistas"), "{summary}");
+        let pl = app.playlists.items.iter().find(|p| p.name == "mi mix").unwrap();
+        assert_eq!(pl.tracks[0].id, "abc123");
+        assert_eq!(pl.tracks[0].title, "canción");
     }
 
     #[test]
