@@ -14,6 +14,18 @@ Tests de integración (requieren `mpv`, `yt-dlp` y acceso a red):
 cargo test -- --ignored
 ```
 
+## Verificación E2E del checklist
+
+`scripts/e2e_check.py` ejecuta la app real en una terminal emulada (pexpect + pyte) y comprueba de punta a punta el checklist de aceptación del SPEC §11 y la fase 18: arranque < 1 s, búsqueda con resultados, reproducción < 5 s, controles sin reiniciar, progreso real, errores en UI sin cerrar la app, URL pegada resuelta directamente y copia al portapapeles. Usa datos aislados en un directorio temporal y emula un terminal kitty (responde la query de capacidades gráficas; `--dumb-startup` añade la medición de arranque en un terminal sin respuesta).
+
+```sh
+cargo build --release
+python3 scripts/e2e_check.py                 # requiere pexpect y pyte
+python3 scripts/e2e_check.py --dumb-startup  # + terminal mudo <2s
+```
+
+Reproduce audio real y accede a red: si YouTube responde con bloqueo anti-bot, los tests de búsqueda fallan sin que sea regresión (ver `docs/anti-bot.md`).
+
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) corre en cada push/PR a `main`:
