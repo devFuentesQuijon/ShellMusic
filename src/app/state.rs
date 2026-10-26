@@ -349,7 +349,10 @@ impl App {
                 .map(Message::error),
             searching: false,
             should_quit: false,
-            providers: vec![(ProviderKind::Youtube, Arc::new(YoutubeProvider::new()))],
+            providers: vec![(
+                ProviderKind::Youtube,
+                Arc::new(YoutubeProvider::new(&config.youtube)),
+            )],
             active_provider: 0,
             radio: config.radio.enabled,
             radio_mode: RadioMode::from_name(&config.radio.mode).unwrap_or_default(),

@@ -63,6 +63,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("P", "gestor de playlists"),
             ("t", "estadísticas de escucha"),
             ("X / I", "exportar / importar datos"),
+            ("y", "copiar título, artista y URL de la pista"),
             ("?", "esta ayuda"),
             ("q / Ctrl+C", "salir"),
         ],

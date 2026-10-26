@@ -5,7 +5,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 
 use crate::player::Player;
-use crate::providers::{MusicProvider, ProviderKind, Track};
+use crate::providers::{MusicProvider, ProviderKind, Track, provider_for_url};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
@@ -156,7 +156,21 @@ pub(super) fn submit_search(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     if query.is_empty() || app.searching {
         return;
     }
-    let Some((_, provider)) = app.providers.get(app.active_provider).cloned() else {
+    // Una URL de cualquier proveedor conocido se resuelve con ese proveedor,
+    // aunque no sea el activo; si no está habilitado, se usa el activo.
+    let provider = provider_for_url(&query)
+        .and_then(|kind| {
+            app.providers
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map(|(_, p)| Arc::clone(p))
+        })
+        .or_else(|| {
+            app.providers
+                .get(app.active_provider)
+                .map(|(_, p)| Arc::clone(p))
+        });
+    let Some(provider) = provider else {
         return;
     };
     app.history.push(&query);

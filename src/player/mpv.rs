@@ -207,13 +207,15 @@ impl MpvPlayer {
     pub async fn spawn(
         initial_volume: u8,
         youtube: &Youtube,
+        audio_format: &str,
     ) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
-        Self::spawn_with_args(initial_volume, youtube, &[]).await
+        Self::spawn_with_args(initial_volume, youtube, audio_format, &[]).await
     }
 
     pub async fn spawn_with_args(
         initial_volume: u8,
         youtube: &Youtube,
+        audio_format: &str,
         extra_args: &[&str],
     ) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
         let socket_path = ipc_server_path();
@@ -241,6 +243,9 @@ impl MpvPlayer {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
+        if !audio_format.is_empty() {
+            command.arg(format!("--ytdl-format={audio_format}"));
+        }
         let mut child = command.spawn().context("no se pudo lanzar mpv")?;
         let stderr = child.stderr.take();
 

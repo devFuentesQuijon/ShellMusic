@@ -18,11 +18,11 @@ use crate::app::{App, Focus, Overlay};
 
 const HELP_SEARCH: &str = "Enter buscar · Tab panel · Esc resultados · Ctrl+C salir";
 const HELP_RESULTS: &str =
-    "Enter reproducir · a cola · f favorito · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
+    "Enter reproducir · a cola · f favorito · y copiar · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
 const HELP_QUEUE: &str =
-    "Enter reproducir · d eliminar · J/K mover · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
+    "Enter reproducir · d eliminar · J/K mover · y copiar · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
 const HELP_FAVORITES: &str =
-    "Enter reproducir · a cola · d/f quitar · ←/→ seek · l repetir · ? ayuda · q salir";
+    "Enter reproducir · a cola · d/f quitar · y copiar · ←/→ seek · l repetir · ? ayuda · q salir";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let [search_area, middle_area, status_area, player_area] = Layout::vertical([

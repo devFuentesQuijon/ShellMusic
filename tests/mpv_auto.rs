@@ -34,7 +34,7 @@ async fn auto_mode_fast_path_and_session_cache() {
         cookies_from_browser: "auto".to_string(),
         ..Youtube::default()
     };
-    let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, &["--ao=null"])
+    let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, "", &["--ao=null"])
         .await
         .expect("mpv debe lanzarse");
 
@@ -79,7 +79,7 @@ async fn auto_mode_retries_detected_browsers_on_block() {
         remote_components: String::new(),
         pot_provider: "off".to_string(),
     };
-    let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, &["--ao=null"])
+    let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, "", &["--ao=null"])
         .await
         .expect("mpv debe lanzarse");
     let player = Arc::new(player);

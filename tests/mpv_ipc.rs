@@ -14,7 +14,7 @@ async fn mpv_plays_youtube_track_and_position_advances() {
         cookies_from_browser: "firefox".to_string(),
         ..Youtube::default()
     };
-    let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, &["--ao=null"])
+    let (player, mut events) = MpvPlayer::spawn_with_args(70, &youtube, "", &["--ao=null"])
         .await
         .expect("mpv debe lanzarse y aceptar IPC");
     player.play(url, None).await.expect("loadfile debe aceptarse");
@@ -47,7 +47,7 @@ async fn mpv_plays_youtube_track_and_position_advances() {
 #[tokio::test]
 #[ignore = "requiere mpv, yt-dlp y acceso a red"]
 async fn mpv_reports_stderr_detail_on_failure() {
-    let (player, _events) = MpvPlayer::spawn_with_args(70, &Youtube::default(), &["--ao=null"])
+    let (player, _events) = MpvPlayer::spawn_with_args(70, &Youtube::default(), "", &["--ao=null"])
         .await
         .expect("mpv debe lanzarse");
     let err = player

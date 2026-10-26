@@ -256,6 +256,7 @@ fn playback_key(
         KeyCode::Right => seek_by(app, player, tx, seek_step(key)),
         KeyCode::Char('l') => app.next_repeat_mode(),
         KeyCode::Char('S') => shuffle_queue(app),
+        KeyCode::Char('y') => copy_track(app),
         KeyCode::Char('?') => app.overlay = Overlay::Help,
         KeyCode::Char('n') => play_adjacent(app, player, tx, Queue::next_index, "fin de la cola"),
         KeyCode::Char('p') => play_adjacent(app, player, tx, Queue::prev_index, "inicio de la cola"),
@@ -362,6 +363,30 @@ fn current_or_selected(app: &App) -> Option<Track> {
             .and_then(|i| app.favorites.tracks.get(i))
             .cloned(),
         Focus::Searching => None,
+    }
+}
+
+/// Copia al portapapeles la pista que suena o la seleccionada: título,
+/// artista y URL de origen.
+fn copy_track(app: &mut App) {
+    let Some(track) = current_or_selected(app) else {
+        app.message = Some(Message::info("nada que copiar"));
+        return;
+    };
+    let text = format!("{} — {}\n{}", track.title, track.artist, track.source_url);
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(clipboard) => clipboard,
+        Err(err) => {
+            app.message = Some(Message::error(format!("portapapeles no disponible: {err}")));
+            return;
+        }
+    };
+    match clipboard.set_text(&text) {
+        Ok(()) => app.message = Some(Message::info(format!(
+            "copiado al portapapeles: {}",
+            track.source_url
+        ))),
+        Err(err) => app.message = Some(Message::error(format!("no se pudo copiar: {err}"))),
     }
 }
 

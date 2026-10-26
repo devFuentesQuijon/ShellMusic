@@ -23,7 +23,7 @@ async fn mpv_ipc_local_file_position_advances() {
             .expect("ffmpeg debe estar disponible para generar el fixture");
         assert!(status.success());
     }
-    let (player, _events) = MpvPlayer::spawn_with_args(70, &Youtube::default(), &["--ao=null"])
+    let (player, _events) = MpvPlayer::spawn_with_args(70, &Youtube::default(), "", &["--ao=null"])
         .await
         .expect("mpv debe lanzarse y aceptar IPC");
 

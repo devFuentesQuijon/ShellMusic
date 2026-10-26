@@ -1,10 +1,11 @@
+use shellmusic::config::Youtube;
 use shellmusic::providers::MusicProvider;
 use shellmusic::providers::youtube::YoutubeProvider;
 
 #[tokio::test]
 #[ignore = "requiere yt-dlp en PATH y acceso a red"]
 async fn search_daft_punk_returns_results() {
-    let provider = YoutubeProvider::new();
+    let provider = YoutubeProvider::new(&Youtube::default());
     let tracks = provider
         .search("daft punk", 15)
         .await

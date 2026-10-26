@@ -10,6 +10,7 @@ default_provider = "youtube"            # proveedor activo al arrancar (debe est
 
 [audio]
 initial_volume = 70       # 0-100
+format = ""               # selector de formato de yt-dlp (mpv --ytdl-format): "bestaudio", "worst", "bestaudio[abr<=128]", ...; "" = criterio por defecto de yt-dlp
 
 [youtube]
 cookies_from_browser = "auto"   # "auto" | "firefox"/"chrome"/... | "" (nunca usar cookies)
@@ -37,6 +38,8 @@ media_controls = true   # MPRIS en Linux; ver «Integración con el sistema»
 ```
 
 - Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
+- Pegar una URL en la búsqueda (YouTube `watch`/`youtu.be`/playlist/shorts, SoundCloud pista o `on.soundcloud.com`) la resuelve yt-dlp directamente contra esa URL — una pista o los primeros `results_per_search` de una playlist — con el proveedor de la URL aunque no sea el activo. Cualquier otro texto se busca literal.
+- `[audio] format` se pasa a mpv como `--ytdl-format`: elige el formato de extracción (p. ej. `bestaudio` para ahorrar ancho de banda, `worst` en conexiones malas); vacío mantiene el criterio por defecto de yt-dlp.
 - Los colores aceptan nombres (`cyan`, `lightred`, `darkgray`…), hex (`#rrggbb`) e índices de paleta (0-255); un valor inválido usa el color por defecto y avisa en la línea de estado.
 - Hay una [colección de temas listos para copiar](temas.md) (incluida una temática de monstruos clásicos para Halloween).
 - El detalle de `[youtube]` (anti-bot) está en [Bloqueo anti-bot de YouTube](anti-bot.md).

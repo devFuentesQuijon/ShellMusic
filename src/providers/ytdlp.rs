@@ -22,6 +22,26 @@ pub(super) async fn search(
     Ok(tracks)
 }
 
+/// Resuelve una URL de vídeo o playlist directamente, sin prefijo de
+/// búsqueda. Las playlists se recortan a `limit` entradas. `extra_args`
+/// añade opciones de extracción (anti-bot) antes de las banderas propias.
+pub(super) async fn resolve_url(
+    provider: ProviderKind,
+    url: &str,
+    limit: usize,
+    extra_args: &[String],
+) -> Result<Vec<Track>> {
+    let limit = limit.clamp(1, 50);
+    let mut args = vec![url.to_string(), format!("--playlist-end={limit}")];
+    args.extend(extra_args.iter().cloned());
+    let stdout = run_ytdlp(&args).await?;
+    let tracks = parse_lines(&stdout, provider);
+    if tracks.is_empty() {
+        bail!("la URL no devolvió contenido reproducible");
+    }
+    Ok(tracks)
+}
+
 /// La "radio" autogenerada de YouTube para un vídeo (playlist RD<id>):
 /// pistas similares según el algoritmo de YouTube. Fallback del modo
 /// similares de la radio cuando la última pista es de YouTube.

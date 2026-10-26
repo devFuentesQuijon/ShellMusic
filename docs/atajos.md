@@ -22,6 +22,7 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | a | Favoritos | Añadir a la cola sin interrumpir |
 | d / f | Favoritos | Quitar de favoritos |
 | Espacio | Resultados / Cola / Favoritos | Play / pausa |
+| y | Resultados / Cola / Favoritos | Copiar título, artista y URL de la pista (la que suena o la seleccionada) al portapapeles |
 | s | Resultados / Cola / Favoritos | Stop |
 | ← / → | Resultados / Cola / Favoritos | Seek ∓5 s dentro de la pista (con Shift: ∓30 s) |
 | + / - | Resultados / Cola / Favoritos | Volumen arriba / abajo |

@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             }
         }
     }
-    let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube).await {
+    let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube, &config.audio.format).await {
         Ok(ok) => ok,
         Err(err) => {
             eprintln!("No se pudo iniciar mpv: {err:#}");
@@ -69,9 +69,17 @@ async fn main() -> Result<()> {
     };
     // La detección del protocolo de imagen consulta al terminal por
     // stdin/stdout: debe hacerse antes de arrancar el lector de eventos.
-    // Sin detección, halfblocks (funciona en cualquier terminal).
-    let picker = ratatui_image::picker::Picker::from_query_stdio()
-        .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
+    // Los terminales que responden lo hacen en milisegundos; con los que
+    // no (screen, linux, emuladores mudos) el timeout por defecto (2 s por
+    // consulta) retrasaba varios segundos el primer frame. Un timeout corto
+    // cae a halfblocks sin castigar a los terminales reales.
+    let picker = ratatui_image::picker::Picker::from_query_stdio_with_options(
+        ratatui_image::picker::cap_parser::QueryStdioOptions {
+            timeout: Duration::from_millis(500),
+            ..Default::default()
+        },
+    )
+    .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
     let result = app::run(
         &mut terminal,
         providers,
@@ -150,7 +158,7 @@ fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>
         .into_iter()
         .map(|kind| {
             let provider: Arc<dyn MusicProvider> = match kind {
-                ProviderKind::Youtube => Arc::new(YoutubeProvider::new()),
+                ProviderKind::Youtube => Arc::new(YoutubeProvider::new(&config.youtube)),
                 ProviderKind::Soundcloud => Arc::new(SoundcloudProvider::new()),
             };
             let provider = if config.cache.enabled {

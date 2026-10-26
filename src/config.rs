@@ -14,6 +14,7 @@ default_provider = \"youtube\"              # proveedor activo al arrancar (debe
 
 [audio]
 initial_volume = 70       # 0-100
+format = \"\"               # selector de formato que recibe yt-dlp (mpv --ytdl-format): \"bestaudio\", \"worst\", \"bestaudio[abr<=128]\", ...; \"\" = criterio por defecto de yt-dlp
 
 [youtube]
 cookies_from_browser = \"auto\"   # \"auto\": primero sin cookies y, si YouTube bloquea, reintenta con cada navegador instalado; \"firefox\"/\"chrome\"/...: solo ese; \"\": nunca usar cookies
@@ -65,6 +66,9 @@ pub struct General {
 #[serde(default)]
 pub struct Audio {
     pub initial_volume: u8,
+    /// Selector de formato de extracción de yt-dlp (mpv `--ytdl-format`);
+    /// vacío = criterio por defecto de yt-dlp.
+    pub format: String,
 }
 
 impl Default for General {
@@ -79,7 +83,10 @@ impl Default for General {
 
 impl Default for Audio {
     fn default() -> Self {
-        Self { initial_volume: 70 }
+        Self {
+            initial_volume: 70,
+            format: String::new(),
+        }
     }
 }
 
@@ -209,6 +216,7 @@ impl Config {
             config.general.default_provider = config.general.providers[0].clone();
         }
         config.audio.initial_volume = config.audio.initial_volume.min(100);
+        config.audio.format = config.audio.format.trim().to_string();
         config.youtube.cookies_from_browser = config.youtube.cookies_from_browser.trim().to_string();
         config.youtube.player_client = config.youtube.player_client.trim().to_string();
         config.youtube.remote_components = config.youtube.remote_components.trim().to_string();
