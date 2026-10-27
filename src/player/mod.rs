@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlaybackStatus {
     pub position: Option<Duration>,
     pub duration: Option<Duration>,

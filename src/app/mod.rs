@@ -117,8 +117,12 @@ pub async fn run(
         play_queue_track_from(&mut app, &player, &tx, current, start);
     }
 
+    // Primer frame inmediato; después, redraw perezoso: solo se repinta
+    // cuando algo cambia. El tick repinta solo si el estado del player
+    // difiere del último frame dibujado, así la app en pausa no renderiza.
+    terminal.draw(|frame| tui::draw(frame, &mut app))?;
+    let mut needs_redraw = false;
     loop {
-        terminal.draw(|frame| tui::draw(frame, &mut app))?;
         let tick = tokio::time::sleep(TICK);
         tokio::select! {
             event = keys.next() => {
@@ -127,39 +131,49 @@ pub async fn run(
                 {
                     handle_key(&mut app, key, &player, &tx);
                 }
+                needs_redraw = true;
             }
             _ = tick => {
                 periodic_save(&mut app);
                 if !player_respawning
                     && let Ok(status) = player.status().await
+                    && status != app.status
                 {
                     app.status = status;
+                    needs_redraw = true;
                 }
             }
-            Some(msg) = rx.recv() => handle_msg(&mut app, msg, &player, &tx),
+            Some(msg) = rx.recv() => {
+                handle_msg(&mut app, msg, &player, &tx);
+                needs_redraw = true;
+            }
             Some(command) = media_rx.recv() => {
                 handle_media_command(&mut app, command, &player, &tx);
+                needs_redraw = true;
             }
-            Some(event) = player_events.recv() => match event {
-                PlayerEvent::Notice(PlayerNotice { text, is_error }) => {
-                    app.message = Some(Message { text, is_error });
-                }
-                PlayerEvent::TrackEnded => autoplay_next(&mut app, &player, &tx),
-                PlayerEvent::Died => {
-                    if !player_respawning {
-                        respawn_times.retain(|t| t.elapsed() < Duration::from_secs(60));
-                        if respawn_times.len() >= 3 {
-                            app.message = Some(Message::error(
-                                "mpv no arranca tras varios intentos; reinicia la app",
-                            ));
-                        } else {
-                            respawn_times.push(std::time::Instant::now());
-                            player_respawning = true;
-                            app.message = Some(Message::info("mpv se cerró; reiniciándolo…"));
-                            respawn_player(&mut respawn_rx, &youtube, &audio_format, app.status.volume);
+            Some(event) = player_events.recv() => {
+                match event {
+                    PlayerEvent::Notice(PlayerNotice { text, is_error }) => {
+                        app.message = Some(Message { text, is_error });
+                    }
+                    PlayerEvent::TrackEnded => autoplay_next(&mut app, &player, &tx),
+                    PlayerEvent::Died => {
+                        if !player_respawning {
+                            respawn_times.retain(|t| t.elapsed() < Duration::from_secs(60));
+                            if respawn_times.len() >= 3 {
+                                app.message = Some(Message::error(
+                                    "mpv no arranca tras varios intentos; reinicia la app",
+                                ));
+                            } else {
+                                respawn_times.push(std::time::Instant::now());
+                                player_respawning = true;
+                                app.message = Some(Message::info("mpv se cerró; reiniciándolo…"));
+                                respawn_player(&mut respawn_rx, &youtube, &audio_format, app.status.volume);
+                            }
                         }
                     }
                 }
+                needs_redraw = true;
             },
             // El respawn de mpv no es instantáneo: no puede vivir dentro del
             // select! (tokio::spawn devuelve JoinHandle, no un receiver).
@@ -177,7 +191,12 @@ pub async fn run(
                         app.message = Some(Message::error(format!("no se pudo reiniciar mpv: {err}")));
                     }
                 }
+                needs_redraw = true;
             }
+        }
+        if needs_redraw {
+            terminal.draw(|frame| tui::draw(frame, &mut app))?;
+            needs_redraw = false;
         }
         set_tab_title(&desired_title(&app), &mut last_title);
         system.update(&app);
