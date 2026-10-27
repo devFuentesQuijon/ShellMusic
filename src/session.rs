@@ -201,6 +201,31 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    /// Cola grande: guardar+recargar 500 pistas debe ser rápido (la
+    /// serialización es por referencia). Margen generoso (10×) para que el
+    /// test no sea flaky en discos lentos o CI cargado.
+    #[test]
+    fn large_session_round_trip_is_fast() {
+        let path = temp_path("grande.json");
+        let session = Session {
+            tracks: (0..500).map(|i| track(&i.to_string())).collect(),
+            current: Some(499),
+            position: Some(Duration::from_secs(30)),
+        };
+        let t0 = std::time::Instant::now();
+        session.save(&path).unwrap();
+        let (loaded, warning) = Session::load(&path).unwrap();
+        let elapsed = t0.elapsed();
+        assert!(warning.is_none());
+        assert_eq!(loaded.tracks.len(), 500);
+        assert_eq!(loaded.current, Some(499));
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "guardar+cargar 500 pistas tardó {elapsed:?}"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
     #[test]
     fn read_error_propagates() {
         let path = temp_path("es-directorio.json");

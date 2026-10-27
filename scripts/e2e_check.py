@@ -369,17 +369,18 @@ def run_cli_flags(binary):
     ui.close()
 
     # pty real (pexpect) para pasar el chequeo de TTY: el error llega a stderr
-    # con la lista de temas y el proceso sale con código 2.
+    # con la lista de temas y el proceso sale con código 2. close() cosecha el
+    # proceso: sin él, exitstatus puede no estar relleno tras el EOF.
     child = pexpect.spawn(binary, ["-t", "temaimposiblexyz"],
                           env=make_env(), encoding="utf-8", timeout=15,
                           cwd=str(REPO_ROOT))
     child.expect(pexpect.EOF)
     out = child.before
+    child.close()
     ok = ("Tema desconocido" in out and "dracula" in out
           and child.exitstatus == 2)
     check("-t <tema inexistente> falla con lista y exit 2", ok,
           f"(exit {child.exitstatus})")
-    child.close()
 
 
 def main():
