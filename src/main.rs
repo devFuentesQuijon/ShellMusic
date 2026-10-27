@@ -98,13 +98,14 @@ async fn main() -> Result<()> {
     result
 }
 
-const USAGE: &str = "Uso: smusic [--theme <nombre>] [--play <búsqueda>]
+const USAGE: &str = "Uso: smusic [-t <nombre>] [-p <búsqueda>]
 
 Opciones:
-  --theme <nombre>   usa un tema empaquetado en lugar del de config.toml
-  --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
-  -h, --help         muestra esta ayuda";
+  -t, --theme <nombre>   usa un tema empaquetado en lugar del de config.toml
+  -p, --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
+  -h, --help             muestra esta ayuda";
 
+#[derive(Debug)]
 struct Cli {
     theme: Option<String>,
     play: Option<String>,
@@ -112,24 +113,28 @@ struct Cli {
 }
 
 fn parse_args() -> std::result::Result<Cli, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cli, String> {
     let mut cli = Cli {
         theme: None,
         play: None,
         help: false,
     };
-    let mut args = std::env::args().skip(1);
+    let mut args = args.peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--theme" => {
+            "-t" | "--theme" => {
                 cli.theme = Some(
                     args.next()
-                        .ok_or_else(|| "--theme necesita un nombre de tema".to_string())?,
+                        .ok_or_else(|| "-t/--theme necesita un nombre de tema".to_string())?,
                 );
             }
-            "--play" => {
+            "-p" | "--play" => {
                 cli.play = Some(
                     args.next()
-                        .ok_or_else(|| "--play necesita un texto de búsqueda".to_string())?,
+                        .ok_or_else(|| "-p/--play necesita un texto de búsqueda".to_string())?,
                 );
             }
             "-h" | "--help" => cli.help = true,
@@ -222,5 +227,58 @@ fn ytdlp_staleness_warning(version: &str) -> Option<String> {
         ))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(tokens: &[&str]) -> std::vec::IntoIter<String> {
+        tokens.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter()
+    }
+
+    #[test]
+    fn tema_largo_y_corto() {
+        for flag in ["--theme", "-t"] {
+            let cli = parse_args_from(args(&[flag, "dracula"])).unwrap();
+            assert_eq!(cli.theme.as_deref(), Some("dracula"));
+            assert!(!cli.help);
+        }
+    }
+
+    #[test]
+    fn play_largo_y_corto() {
+        for flag in ["--play", "-p"] {
+            let cli = parse_args_from(args(&[flag, "daft punk"])).unwrap();
+            assert_eq!(cli.play.as_deref(), Some("daft punk"));
+        }
+    }
+
+    #[test]
+    fn combinados() {
+        let cli = parse_args_from(args(&["-t", "thriller", "--play", "thriller"])).unwrap();
+        assert_eq!(cli.theme.as_deref(), Some("thriller"));
+        assert_eq!(cli.play.as_deref(), Some("thriller"));
+    }
+
+    #[test]
+    fn sin_argumentos() {
+        let cli = parse_args_from(args(&[])).unwrap();
+        assert!(cli.theme.is_none() && cli.play.is_none() && !cli.help);
+    }
+
+    #[test]
+    fn argumento_desconocido_error() {
+        let err = parse_args_from(args(&["--tem"])).unwrap_err();
+        assert!(err.contains("argumento desconocido"), "error: {err}");
+    }
+
+    #[test]
+    fn valor_ausente_error() {
+        for flag in ["--theme", "-t", "--play", "-p"] {
+            let err = parse_args_from(args(&[flag])).unwrap_err();
+            assert!(err.contains("necesita"), "error para {flag}: {err}");
+        }
     }
 }

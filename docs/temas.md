@@ -114,10 +114,10 @@ Todos los temas de esta colección están empaquetados en el binario y se pueden
 
 ```sh
 smusic --theme dracula
-smusic --theme thriller --play "thriller michael jackson"
+smusic -t thriller --play "thriller michael jackson"   # -t es la abreviatura de --theme
 ```
 
-`--theme` acepta cualquiera de estos nombres (dracula, frankenstein, bride, wolfman, mummy, invisible, lagoon, thriller) y tiene prioridad sobre el tema de `config.toml` solo en esa ejecución. `--play` busca al arrancar y suena la primera coincidencia. Con `--help` ves ambas opciones.
+`--theme` (o `-t`) acepta cualquiera de estos nombres (dracula, frankenstein, bride, wolfman, mummy, invisible, lagoon, thriller) y tiene prioridad sobre el tema de `config.toml` solo en esa ejecución. `--play` (o `-p`) busca al arrancar y suena la primera coincidencia. Con `--help` ves ambas opciones.
 
 ## Crear el tuyo
 

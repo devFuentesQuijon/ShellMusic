@@ -48,6 +48,7 @@ cargo run --release
 smusic --theme dracula          # tema empaquetado sin tocar config.toml
 smusic --play "daft punk"       # busca y suena la primera coincidencia
 smusic --theme thriller --play "thriller"   # ambas a la vez
+smusic -t dracula -p "thriller" # abreviaturas: -t = --theme, -p = --play
 ```
 
 Los temas disponibles (`--help` los lista): dracula, frankenstein, bride, wolfman, mummy, invisible, lagoon, thriller — la [colección completa con muestras](docs/temas.md).

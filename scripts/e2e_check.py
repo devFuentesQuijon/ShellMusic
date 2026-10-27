@@ -63,7 +63,7 @@ def screen_text(screen):
 class Ui:
     """App smusic corriendo en un PTY, con terminal gráfico emulado."""
 
-    def __init__(self, env, binary, answer=True):
+    def __init__(self, env, binary, answer=True, args=None):
         self.screen = pyte.Screen(240, 32)
         self.stream = pyte.ByteStream(self.screen)
         self.answer = answer
@@ -72,6 +72,7 @@ class Ui:
         self.log = open(self.log_path, "wb")
         self.child = pexpect.spawn(
             binary,
+            args or [],
             dimensions=(32, 240),
             env=env,
             encoding=None,
@@ -355,6 +356,32 @@ def run_dumb_startup(binary):
           f"({elapsed:.2f}s)")
 
 
+def run_cli_flags(binary):
+    """Abreviaturas -t/--theme: arranca con un tema y rechaza uno inexistente."""
+    ui = Ui(make_env(), binary, answer=False, args=["-t", "dracula"])
+    t0 = time.time()
+    found = ui.wait_for(r"Buscar en YouTube \(Enter: buscar", 15)
+    elapsed = time.time() - t0
+    check("-t <tema> arranca y pinta la UI", found and elapsed < 5.0,
+          f"({elapsed:.2f}s)")
+    ui.send("q")
+    ui.pump(0.5)
+    ui.close()
+
+    # pty real (pexpect) para pasar el chequeo de TTY: el error llega a stderr
+    # con la lista de temas y el proceso sale con código 2.
+    child = pexpect.spawn(binary, ["-t", "temaimposiblexyz"],
+                          env=make_env(), encoding="utf-8", timeout=15,
+                          cwd=str(REPO_ROOT))
+    child.expect(pexpect.EOF)
+    out = child.before
+    ok = ("Tema desconocido" in out and "dracula" in out
+          and child.exitstatus == 2)
+    check("-t <tema inexistente> falla con lista y exit 2", ok,
+          f"(exit {child.exitstatus})")
+    child.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--binary", default=str(REPO_ROOT / "target/release/smusic"),
@@ -370,6 +397,7 @@ def main():
 
     print(f"Binario: {binary}")
     run_suite(binary)
+    run_cli_flags(binary)
     if args.dumb_startup:
         run_dumb_startup(binary)
 
