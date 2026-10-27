@@ -17,6 +17,13 @@ struct HistoryFile {
     entries: Vec<String>,
 }
 
+/// Vista prestada para serializar sin clonar las entradas.
+#[derive(Serialize)]
+struct HistoryRef<'a> {
+    version: u32,
+    entries: &'a [String],
+}
+
 #[derive(Debug, Default)]
 pub struct History {
     pub entries: Vec<String>,
@@ -102,11 +109,12 @@ impl History {
                 self.entries.drain(..excess);
             }
         }
-        let file = HistoryFile {
+        // JSON compacto: archivo interno; el parseo es idéntico. Se serializa
+        // por referencia: el fingerprint debe ser el texto exacto escrito.
+        let content = serde_json::to_string(&HistoryRef {
             version: VERSION,
-            entries: self.entries.clone(),
-        };
-        let content = serde_json::to_string_pretty(&file)?;
+            entries: &self.entries,
+        })?;
         let tmp = unique_tmp_path(path);
         fs::write(&tmp, &content)?;
         fs::rename(&tmp, path)?;

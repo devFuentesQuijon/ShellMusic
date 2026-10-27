@@ -11,10 +11,19 @@ use crate::providers::Track;
 
 const VERSION: u32 = 1;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct SessionFile {
     version: u32,
     tracks: Vec<Track>,
+    current: Option<usize>,
+    position_secs: f64,
+}
+
+/// Vista prestada de la sesión para serializar sin clonar la cola.
+#[derive(Serialize)]
+struct SessionRef<'a> {
+    version: u32,
+    tracks: &'a [Track],
     current: Option<usize>,
     position_secs: f64,
 }
@@ -84,14 +93,16 @@ impl Session {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        let file = SessionFile {
+        let file = SessionRef {
             version: VERSION,
-            tracks: self.tracks.clone(),
+            tracks: &self.tracks,
             current: self.current,
             position_secs: self.position.map_or(0.0, |p| p.as_secs_f64()),
         };
+        // JSON compacto: archivo interno que nadie edita a mano; el parseo
+        // es idéntico y se ahorra CPU y bytes en cada cambio de pista.
         let tmp = unique_tmp_path(path);
-        fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
+        fs::write(&tmp, serde_json::to_string(&file)?)?;
         fs::rename(&tmp, path)?;
         Ok(())
     }

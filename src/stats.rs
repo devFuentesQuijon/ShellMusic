@@ -47,6 +47,13 @@ struct StatsFile {
     entries: Vec<StatsEntry>,
 }
 
+/// Vista prestada para serializar sin clonar las entradas.
+#[derive(Serialize)]
+struct StatsRef<'a> {
+    version: u32,
+    entries: &'a [StatsEntry],
+}
+
 /// Normaliza un nombre de artista para agrupar estadísticas: quita los
 /// sufijos que YouTube añade a los canales oficiales («Daft Punk - Topic»,
 /// «VEVO», «Official»…), los segmentos «feat. …» y colapsa espacios, en
@@ -142,12 +149,16 @@ impl Stats {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
-        let file = StatsFile {
-            version: VERSION,
-            entries: self.entries.clone(),
-        };
+        // JSON compacto por referencia: sin clonar las entradas y con menos
+        // bytes; el parseo es idéntico.
         let tmp = unique_tmp_path(path);
-        fs::write(&tmp, serde_json::to_string_pretty(&file)?)?;
+        fs::write(
+            &tmp,
+            serde_json::to_string(&StatsRef {
+                version: VERSION,
+                entries: &self.entries,
+            })?,
+        )?;
         fs::rename(&tmp, path)?;
         Ok(())
     }
