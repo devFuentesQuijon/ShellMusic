@@ -64,6 +64,12 @@ ShellMusic necesita `mpv` y `yt-dlp` en el `PATH`. Si falta alguno, muestra las 
 | macOS | `brew install mpv yt-dlp` |
 | Windows | `winget install mpv yt-dlp` |
 
+> **Windows**: con doble clic el `.exe` abre una consola propia que Windows
+> cierra al terminar el proceso. Si algo falla en el arranque (lo habitual:
+> falta mpv o yt-dlp), ShellMusic muestra el error y espera a que pulses
+> Enter antes de cerrarla. Desde PowerShell o cmd (`.\smusic.exe`) el
+> mensaje queda siempre visible.
+
 ## Documentación
 
 La guía completa vive en [`docs/`](docs/README.md):

@@ -18,27 +18,21 @@ use tokio::process::Command;
 async fn main() -> Result<()> {
     let cli = match parse_args() {
         Ok(cli) => cli,
-        Err(err) => {
-            eprintln!("{err}\n\n{USAGE}");
-            std::process::exit(2);
-        }
+        Err(err) => fatal(&format!("{err}\n\n{USAGE}"), 2),
     };
     if cli.lastfm_auth {
         return lastfm_auth().await;
     }
     if !std::io::stdout().is_terminal() {
-        eprintln!(
+        fatal(
             "ShellMusic necesita un terminal interactivo (TTY) para su interfaz.\n\
-             Ejecuta `smusic` directamente en una terminal, sin redirigir la salida."
+             Ejecuta `smusic` directamente en una terminal, sin redirigir la salida.",
+            1,
         );
-        std::process::exit(1);
     }
     let ytdlp_version = match check_dependencies().await {
         Ok(version) => version,
-        Err(err) => {
-            eprintln!("{err:#}");
-            std::process::exit(1);
-        }
+        Err(err) => fatal(&format!("{err:#}"), 1),
     };
     let ytdlp_stale = ytdlp_staleness_warning(&ytdlp_version);
     let mut config = Config::load()?;
@@ -46,30 +40,26 @@ async fn main() -> Result<()> {
         match shellmusic::theme::find_preset(name) {
             Some(preset) => config.theme = preset.clone(),
             None => {
-                eprintln!(
-                    "Tema desconocido: «{name}». Disponibles: {}",
-                    shellmusic::theme::preset_names().join(", ")
+                fatal(
+                    &format!(
+                        "Tema desconocido: «{name}». Disponibles: {}",
+                        shellmusic::theme::preset_names().join(", ")
+                    ),
+                    2,
                 );
-                std::process::exit(2);
             }
         }
     }
     let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube, &config.audio.format, config.audio.gapless).await {
         Ok(ok) => ok,
-        Err(err) => {
-            eprintln!("No se pudo iniciar mpv: {err:#}");
-            std::process::exit(1);
-        }
+        Err(err) => fatal(&format!("No se pudo iniciar mpv: {err:#}"), 1),
     };
     let player = Arc::new(player);
     let providers = build_providers(&config);
 
     let mut terminal = match ratatui::try_init() {
         Ok(terminal) => terminal,
-        Err(err) => {
-            eprintln!("No se pudo inicializar el terminal: {err}");
-            std::process::exit(1);
-        }
+        Err(err) => fatal(&format!("No se pudo inicializar el terminal: {err}"), 1),
     };
     // Captura de ratón (configurable, [general] mouse): click en la barra =
     // seek, rueda = volumen. Se libera antes de restaurar el terminal.
@@ -115,7 +105,55 @@ async fn main() -> Result<()> {
         );
     }
     ratatui::restore();
-    result
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) => fatal(&format!("{err:#}"), 1),
+    }
+}
+
+/// Imprime `msg` en stderr y termina con `code`. En Windows, si la consola
+/// la creó el SO para este proceso (doble clic sobre el .exe), espera un
+/// Enter antes de salir: sin la pausa, la consola se destruye al terminar el
+/// proceso y el mensaje de error queda invisible. Desde una terminal del
+/// usuario no pausa (su consola no se cierra).
+fn fatal(msg: &str, code: i32) -> ! {
+    eprintln!("{msg}");
+    pause_own_console();
+    std::process::exit(code);
+}
+
+#[cfg(windows)]
+fn pause_own_console() {
+    if !own_console(attached_processes()) {
+        return;
+    }
+    eprintln!("Pulsa Enter para cerrar.");
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+}
+
+#[cfg(not(windows))]
+fn pause_own_console() {}
+
+/// Decisión pura: ¿la consola es exclusiva de este proceso? Una consola con
+/// un único proceso adjunto es la que Windows crea al hacer doble clic; una
+/// terminal compartida tiene siempre más (shell, proceso padre, hijos…).
+#[cfg(any(windows, test))]
+fn own_console(attached: u32) -> bool {
+    attached == 1
+}
+
+#[cfg(windows)]
+fn attached_processes() -> u32 {
+    // FFI mínimo a kernel32: es la única forma de distinguir «consola creada
+    // por doble clic» de «terminal del usuario». Llamada sin estado ni
+    // efectos sobre un buffer propio; el unsafe queda acotado a ella.
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetConsoleProcessList(process_ids: *mut u32, count: u32) -> u32;
+    }
+    let mut ids = [0u32; 16];
+    unsafe { GetConsoleProcessList(ids.as_mut_ptr(), ids.len() as u32) }
 }
 
 const USAGE: &str = "Uso: smusic [-t <nombre>] [-p <búsqueda>] [--lastfm-auth]
@@ -176,8 +214,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
 /// directorio de datos para que el scrobbling la encuentre al arrancar.
 async fn lastfm_auth() -> Result<()> {
     if !std::io::stdout().is_terminal() {
-        eprintln!("smusic --lastfm-auth necesita un terminal interactivo.");
-        std::process::exit(1);
+        fatal("smusic --lastfm-auth necesita un terminal interactivo.", 1);
     }
     let config = Config::load()?;
     let session = shellmusic::lastfm::auth_interactive(&config.lastfm.api_key, &config.lastfm.secret)
@@ -337,5 +374,15 @@ mod tests {
         let cli = parse_args_from(args(&["-t", "dracula", "--lastfm-auth"])).unwrap();
         assert!(cli.lastfm_auth);
         assert_eq!(cli.theme.as_deref(), Some("dracula"));
+    }
+
+    #[test]
+    fn consola_propia_solo_con_un_proceso_adjunto() {
+        // Doble clic en Windows: consola dedicada con un único proceso.
+        assert!(own_console(1));
+        // Terminal compartida (shell, padre, hijos…) o error de la API.
+        assert!(!own_console(0));
+        assert!(!own_console(2));
+        assert!(!own_console(17));
     }
 }
