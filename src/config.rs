@@ -11,6 +11,7 @@ const DEFAULT_TOML: &str = "\
 results_per_search = 15   # 1-50
 providers = [\"youtube\", \"soundcloud\", \"bandcamp\"]   # proveedores habilitados; la tecla m cicla entre ellos
 default_provider = \"youtube\"              # proveedor activo al arrancar (debe estar en la lista)
+mouse = true                # ratón: click en la barra = seek · rueda = volumen · click en panel = foco (false deja la selección de texto del terminal)
 
 [audio]
 initial_volume = 70       # 0-100
@@ -61,6 +62,10 @@ pub struct General {
     pub results_per_search: usize,
     pub providers: Vec<String>,
     pub default_provider: String,
+    /// Captura de ratón (click en la barra = seek, rueda = volumen, click
+    /// en panel = foco). Apagado, la selección de texto del terminal sigue
+    /// disponible.
+    pub mouse: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,6 +91,7 @@ impl Default for General {
                 "bandcamp".to_string(),
             ],
             default_provider: "youtube".to_string(),
+            mouse: true,
         }
     }
 }

@@ -376,6 +376,70 @@ def run_suite(binary):
     ui.send("\x1b")
     ui.pump(0.3)
 
+    # ── 8c. Fase 22: ratón, paleta de comandos y filtro de favoritos ────
+    # La app sigue con la cola del álbum (4/5 sonando, pista insertada con e).
+    # Rueda del ratón arriba: volumen +5. Secuencia SGR 1006 que crossterm
+    # parsea como ScrollUp en cualquier posición (64 = rueda arriba).
+    v0 = wait_bar(ui, 5)
+    ui.send("\x1b[<64;50;10M")   # wheel up (botón 4)
+    ui.pump(0.5)
+    v1 = wait_bar(ui, 5)
+    check("rueda del ratón sube volumen",
+          v0 and v1 and v1["vol"] > v0["vol"],
+          f"({v0['vol'] if v0 else '?'}→{v1['vol'] if v1 else '?'})")
+
+    # Click en la mitad de la barra del reproductor: seek a ~50% de la
+    # duración. La barra ocupa las 3 últimas filas del terminal 240x32.
+    dur = v1["dur"] if v1 else 0
+    before = v1["pos"] if v1 else 0
+    ui.send("\x1b[<0;120;30M")   # press izquierdo, col 120, fila 30 (barra)
+    ui.send("\x1b[<0;120;30m")   # release
+    ui.pump(1.0)
+    s2 = wait_bar(ui, 10)
+    if s2 and dur > 0:
+        expected = dur // 2
+        check("click en la barra = seek a ~mitad",
+              abs(s2["pos"] - expected) <= max(10, dur // 10),
+              f"(pos {before}→{s2['pos']}, esperado ~{expected} de {dur})")
+    else:
+        check("click en la barra = seek a ~mitad", False, "barra no legible")
+
+    # Paleta de comandos: ':' + «pause» + Enter pausa la reproducción.
+    ui.send(":")
+    ui.pump(0.4)
+    check("paleta de comandos se abre", "Comandos" in ui.text())
+    ui.send("pause")
+    ui.pump(0.3)
+    check("paleta filtra en vivo", "pause" in ui.text())
+    ui.send("\r")
+    ui.pump(0.8)
+    check("comando pause ejecuta", ui.wait_for(r"⏸ .*cola", 5))
+    ui.send(" ")  # reanudar
+    check("espacio reanuda tras paleta", ui.wait_for(r"▶ .*cola", 5))
+
+    # Filtro en vivo de favoritos: marcar un favorito, Tab a Favoritos,
+    # '/' + texto que filtre, comprobar recuento; Esc restaura.
+    ui.send("\x1b")              # foco a resultados
+    ui.pump(0.3)
+    ui.send("f")                 # marcar favorito la selección
+    ui.pump(0.5)
+    ui.send("\t")                # a cola
+    ui.send("\t")                # a favoritos
+    ui.pump(0.4)
+    ui.send("/")
+    ui.pump(0.3)
+    ui.send("zzqsinmatch")       # texto que no casa con nada
+    ui.pump(0.5)
+    fav_text = ui.text()
+    m_fav = re.search(r"Favoritos \((\d+)/(\d+)\)", fav_text)
+    check("filtro de favoritos recorta la lista",
+          m_fav is not None and int(m_fav.group(1)) == 0 and int(m_fav.group(2)) >= 1,
+          f"({m_fav.group(0) if m_fav else 'sin recuento'})")
+    ui.send("\x1b")              # esc: suelta el filtro
+    ui.pump(0.4)
+    ui.send("\x1b")              # esc: foco a resultados
+    ui.pump(0.3)
+
     # ── Salir ───────────────────────────────────────────────────────────
     ui.send("q")
     ui.pump(1.0)

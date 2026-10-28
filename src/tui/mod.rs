@@ -1,3 +1,4 @@
+pub mod command;
 pub mod favorites;
 pub mod help;
 pub mod nowplaying;
@@ -40,6 +41,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Percentage(30),
     ])
     .areas(middle_area);
+    // Áreas para el hit-testing del ratón: click en barra = seek, click en
+    // panel = foco, click en fila = selección.
+    app.areas = crate::app::PanelAreas {
+        results: results_area,
+        queue: queue_area,
+        favorites: favorites_area,
+        player: player_area,
+    };
     // Filas útiles de los paneles (menos el borde) para PgUp/PgDn.
     app.list_page_size = middle_area.height.saturating_sub(2).max(1) as usize;
     search::draw_input(frame, app, search_area);
@@ -50,6 +59,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     player_bar::draw(frame, app, player_area);
     playlists::draw(frame, app);
     help::draw(frame, app);
+    command::draw(frame, app);
     stats::draw(frame, app);
     stats::draw_export(frame, app);
     stats::draw_path_input(frame, app);
@@ -74,6 +84,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 Overlay::Lyrics => "letra: ↑/↓ scroll · Esc cierra",
                 Overlay::NowPlaying => "sonando ahora: Esc cierra",
                 Overlay::Export | Overlay::PathInput(_) => "exportar/importar: Enter confirmar · Esc cancelar",
+                Overlay::Command => "comandos: Enter ejecutar · Esc cerrar",
                 _ => "playlists: las teclas se muestran dentro del panel",
             }
             .to_string(),

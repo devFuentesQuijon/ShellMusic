@@ -66,12 +66,19 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
         app.overlay = Overlay::List;
         return;
     };
-    let title = format!("Playlist: {} ({})", playlist_ref.name, playlist_ref.tracks.len());
-    let items: Vec<ListItem> = playlist_ref
-        .tracks
+    let visible = app.visible_content(playlist);
+    let total = playlist_ref.tracks.len();
+    let filter_note = if visible.len() != total {
+        format!("{}/{}", visible.len(), total)
+    } else {
+        total.to_string()
+    };
+    let title = format!("Playlist: {} ({filter_note})", playlist_ref.name);
+    let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
-        .map(|(i, track)| {
+        .map(|(v, real)| {
+            let track = &playlist_ref.tracks[*real];
             let playing = app
                 .queue
                 .current_track()
@@ -80,7 +87,7 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
             ListItem::new(format!(
                 "{}{}. {} — {} ({})",
                 marker,
-                i + 1,
+                v + 1,
                 track.title,
                 track.artist,
                 fmt_duration(track.duration)
@@ -92,12 +99,39 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_content_state);
-    draw_hints(
-        frame,
-        area,
-        "Enter reproducir · a cola · A toda · d quitar · J/K mover · Esc volver",
-        app.theme.muted,
-    );
+
+    // Línea de filtro en el borde inferior (mismo patrón que favoritos).
+    if !matches!(app.content_filter_state, crate::app::FilterState::Off) {
+        let filter_area = Rect {
+            x: area.x + 1,
+            y: area.y + area.height.saturating_sub(1),
+            width: area.width.saturating_sub(2),
+            height: 1,
+        };
+        let cursor = if matches!(app.content_filter_state, crate::app::FilterState::Editing) {
+            "_"
+        } else {
+            ""
+        };
+        frame.render_widget(
+            Paragraph::new(format!("/{}{}", app.content_filter, cursor))
+                .style(Style::new().fg(app.theme.highlight)),
+            filter_area,
+        );
+        draw_hints(
+            frame,
+            area,
+            "Enter/a/A actúan sobre la lista filtrada · Esc volver",
+            app.theme.muted,
+        );
+    } else {
+        draw_hints(
+            frame,
+            area,
+            "Enter reproducir · a cola · / filtrar · A toda · d quitar · J/K mover · Esc volver",
+            app.theme.muted,
+        );
+    }
 }
 
 fn draw_name_input(frame: &mut Frame, app: &mut App, area: Rect, context: &NameContext) {

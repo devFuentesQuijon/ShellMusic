@@ -36,6 +36,8 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | PgUp / PgDn | Listas (resultados, cola, favoritos, playlists) | Saltar una página |
 | g / G | Listas (resultados, cola, favoritos, playlists) | Ir al inicio / al final |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda |
+| / | Favoritos / Contenido de playlist | Filtrar la lista en vivo: escribe y la lista se recorta (título/artista, sin distinguir mayúsculas); Enter opera sobre la lista filtrada, Esc suelta el filtro |
+| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~14 comandos (`pause`, `vol 80`, `theme dracula`…) y Enter ejecuta el primero |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
@@ -48,6 +50,15 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | r | Resultados / Cola / Favoritos | Activar / desactivar el modo radio |
 | R | Resultados / Cola / Favoritos | Ciclar el sub-modo de radio: artista → similares → random → random género → rarezas |
 | Ctrl+C | Global | Salir |
+
+## Ratón
+
+Activo por defecto (`[general] mouse = true`; con `false` la selección de texto del terminal sigue funcionando):
+
+- **Click en la barra del reproductor**: seek a la fracción de la duración del punto pulsado.
+- **Rueda arriba / abajo**: volumen ±5.
+- **Click en un panel**: mueve el foco; **click en una fila**: selecciona esa pista.
+- Sobre un overlay abierto el ratón no actúa; mover el ratón no repinta la UI.
 
 ## Overlay de playlists (modal; captura todas las teclas salvo Ctrl+C)
 

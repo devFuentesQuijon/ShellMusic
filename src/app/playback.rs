@@ -410,6 +410,20 @@ pub(super) fn seek_by(
     spawn_player(player, tx, move |p| async move { p.seek(seconds).await });
 }
 
+/// Seek a una posición absoluta (click en la barra de progreso, MPRIS
+/// SetPosition): se expresa como salto relativo a la posición conocida.
+pub(super) fn seek_to(
+    app: &mut App,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    target: std::time::Duration,
+) {
+    if let Some(current) = app.status.position {
+        let delta = target.as_secs_f64() - current.as_secs_f64();
+        seek_by(app, player, tx, delta as i32);
+    }
+}
+
 /// S: baraja la cola manteniendo la pista que suena en su sitio.
 pub(super) fn shuffle_queue(app: &mut App) {
     if app.queue.len() < 2 {

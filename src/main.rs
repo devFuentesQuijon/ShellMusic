@@ -68,6 +68,17 @@ async fn main() -> Result<()> {
             std::process::exit(1);
         }
     };
+    // Captura de ratón (configurable, [general] mouse): click en la barra =
+    // seek, rueda = volumen. Se libera antes de restaurar el terminal.
+    let mouse = config.general.mouse;
+    if mouse
+        && let Err(err) = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::EnableMouseCapture
+        )
+    {
+        eprintln!("No se pudo activar el ratón: {err}");
+    }
     // La detección del protocolo de imagen consulta al terminal por
     // stdin/stdout: debe hacerse antes de arrancar el lector de eventos.
     // Los terminales que responden lo hacen en milisegundos; con los que
@@ -94,6 +105,12 @@ async fn main() -> Result<()> {
         },
     )
     .await;
+    if mouse {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture
+        );
+    }
     ratatui::restore();
     result
 }

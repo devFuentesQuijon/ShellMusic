@@ -14,13 +14,17 @@ use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::system::{MediaCommand, SystemIntegration};
 use crate::tui;
 
+pub(crate) mod commands;
 mod input;
 mod playback;
 mod state;
 
-pub use state::{App, Focus, Message, NameContext, Overlay, PathAction, RadioMode, RepeatMode, StatsView};
+pub use state::{
+    App, FilterState, Focus, Message, NameContext, Overlay, PanelAreas, PathAction, RadioMode,
+    RepeatMode, StatsView,
+};
 
-use input::handle_key;
+use input::{handle_key, handle_mouse};
 use playback::{autoplay_next, handle_msg, play_queue_track_from};
 
 // Reproductor intercambiable: si mpv muere en marcha se respawnea con
@@ -127,12 +131,19 @@ pub async fn run(
         let tick = tokio::time::sleep(TICK);
         tokio::select! {
             event = keys.next() => {
-                if let Some(Ok(Event::Key(key))) = event
-                    && key.kind == KeyEventKind::Press
-                {
-                    handle_key(&mut app, key, &player, &tx);
+                match event {
+                    Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
+                        handle_key(&mut app, key, &player, &tx);
+                        needs_redraw = true;
+                    }
+                    Some(Ok(Event::Mouse(mouse))) => {
+                        // Solo se repinta si el ratón cambió algo: el modo
+                        // «any event» de crossterm reporta movimientos y
+                        // repintar en cada uno sería una tormenta de renders.
+                        needs_redraw = handle_mouse(&mut app, mouse, &player, &tx);
+                    }
+                    _ => {}
                 }
-                needs_redraw = true;
             }
             _ = tick => {
                 periodic_save(&mut app);
@@ -265,7 +276,7 @@ fn handle_media_command(
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
-    use playback::{change_volume, play_adjacent, seek_by, spawn_player};
+    use playback::{change_volume, play_adjacent, seek_by, seek_to, spawn_player};
     use crate::queue::Queue;
     match command {
         MediaCommand::Play | MediaCommand::Pause | MediaCommand::Toggle => {
@@ -292,11 +303,7 @@ fn handle_media_command(
             seek_by(app, player, tx, -(delta.as_secs().min(i32::MAX as u64) as i32));
         }
         MediaCommand::SetPosition(target) => {
-            // Seek relativo respecto a la posición actual conocida.
-            if let Some(current) = app.status.position {
-                let delta = target.as_secs_f64() - current.as_secs_f64();
-                seek_by(app, player, tx, delta as i32);
-            }
+            seek_to(app, player, tx, target);
         }
         MediaCommand::SetVolume(volume) => {
             let current = i16::from(app.status.volume);

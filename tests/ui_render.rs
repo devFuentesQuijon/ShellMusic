@@ -97,6 +97,49 @@ fn favorites_panel_lists_tracks_with_star() {
 }
 
 #[test]
+fn favorites_filter_shows_subset_and_filter_line() {
+    use shellmusic::app::FilterState;
+    let mut app = test_app();
+    app.favorites.add(track("a", "One More Time"));
+    app.favorites.add(track("b", "Bohemian Rhapsody"));
+    app.favorites.add(track("c", "Around the World"));
+    app.favorites_filter = "o".to_string();
+    app.favorites_filter_state = FilterState::Editing;
+    app.focus = Focus::Favorites;
+
+    let screen = render(&mut app);
+    // «o» casa con las tres: al no recortar, el título no muestra fracción.
+    assert!(screen.contains("Favoritos (3)"), "título sin fracción:\n{screen}");
+    assert!(screen.contains("/o_"), "línea de filtro con cursor:\n{screen}");
+
+    // Filtro que recorta: solo las dos que contienen «around»/«one»… mejor
+    // uno determinista: «bohemian» deja la lista en 1/3.
+    app.favorites_filter = "bohemian".to_string();
+    app.favorites_filter_state = FilterState::Applied;
+    let screen = render(&mut app);
+    assert!(screen.contains("Favoritos (1/3)"), "visibles/total:\n{screen}");
+    assert!(screen.contains("Bohemian Rhapsody"), "la coincidente:\n{screen}");
+    assert!(!screen.contains("Around the World"), "la filtrada fuera:\n{screen}");
+    assert!(screen.contains("/bohemian"), "filtro aplicado sin cursor:\n{screen}");
+}
+
+#[test]
+fn command_palette_lists_matching_commands() {
+    use shellmusic::app::Overlay;
+    let mut app = test_app();
+    app.overlay = Overlay::Command;
+    app.overlay_input = "vol".to_string();
+
+    let screen = render(&mut app);
+    assert!(screen.contains("Comandos"), "título del overlay:\n{screen}");
+    assert!(screen.contains(":vol"), "input con prefijo:\n{screen}");
+    assert!(screen.contains("vol up"), "coincidencia 1:\n{screen}");
+    assert!(screen.contains("vol down"), "coincidencia 2:\n{screen}");
+    assert!(screen.contains("vol <n>"), "coincidencia con arg:\n{screen}");
+    assert!(!screen.contains("radio on"), "sin coincidencias ajenas:\n{screen}");
+}
+
+#[test]
 fn results_mark_favorites_with_star() {
     let mut app = test_app();
     app.results = vec![track("a", "Normal"), track("b", "Favorita")];

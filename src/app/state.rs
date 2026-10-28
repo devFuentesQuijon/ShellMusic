@@ -184,6 +184,8 @@ pub enum Overlay {
     Export,
     /// Input de ruta para exportar o importar.
     PathInput(PathAction),
+    /// Paleta de comandos (`:`): ejecuta acciones escribiendo su nombre.
+    Command,
 }
 
 /// Acción que ejecuta `Overlay::PathInput` al confirmar la ruta.
@@ -206,6 +208,28 @@ pub enum StatsView {
     Artists,
     /// Historial cronológico (última reproducción, más reciente primero).
     History,
+}
+
+/// Áreas de los paneles en el último frame dibujado: el hit-testing del
+/// ratón las compara con la posición del evento. Las fija `tui::draw`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PanelAreas {
+    pub results: ratatui::layout::Rect,
+    pub queue: ratatui::layout::Rect,
+    pub favorites: ratatui::layout::Rect,
+    pub player: ratatui::layout::Rect,
+}
+
+/// Estado del filtro en vivo de un panel de lista (favoritos / contenido
+/// de playlist): en `Editing` las teclas alimentan el filtro; en `Applied`
+/// el filtro se mantiene y las teclas normales operan sobre la lista
+/// filtrada. `Off` es la lista completa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FilterState {
+    #[default]
+    Off,
+    Editing,
+    Applied,
 }
 
 impl StatsView {
@@ -237,13 +261,22 @@ pub struct App {
     pub queue_state: ListState,
     pub favorites: Favorites,
     pub favorites_state: ListState,
+    /// Filtro en vivo del panel de favoritos (`/` para editar): subcadena en
+    /// título/artista; la selección opera sobre la lista visible.
+    pub favorites_filter: String,
+    pub favorites_filter_state: FilterState,
     pub playlists: Playlists,
     pub overlay: Overlay,
     pub overlay_list_state: ListState,
     pub overlay_content_state: ListState,
+    /// Filtro en vivo del contenido de playlist (mismo mecanismo que favoritos).
+    pub content_filter: String,
+    pub content_filter_state: FilterState,
     /// Filas visibles de los paneles de listas (resultados/cola/favoritos):
     /// la fija el render en cada frame; alimenta los saltos PgUp/PgDn.
     pub list_page_size: usize,
+    /// Áreas de los paneles del último frame, para el hit-testing del ratón.
+    pub areas: PanelAreas,
     /// Filas visibles de las listas del overlay de playlists.
     pub overlay_page_size: usize,
     pub overlay_input: String,
@@ -362,8 +395,13 @@ impl App {
             overlay_list_state: ListState::default(),
             overlay_content_state: ListState::default(),
             list_page_size: 10,
+            areas: PanelAreas::default(),
             overlay_page_size: 10,
             overlay_input: String::new(),
+            favorites_filter: String::new(),
+            favorites_filter_state: FilterState::Off,
+            content_filter: String::new(),
+            content_filter_state: FilterState::Off,
             pending_delete: None,
             status: PlaybackStatus {
                 volume: config.audio.initial_volume,
@@ -504,9 +542,54 @@ impl App {
     }
 
     pub fn favorites_select(&mut self, index: usize) {
-        if !self.favorites.tracks.is_empty() {
-            self.favorites_state
-                .select(Some(index.min(self.favorites.tracks.len() - 1)));
+        let len = self.visible_favorites().len();
+        if len > 0 {
+            self.favorites_state.select(Some(index.min(len - 1)));
+        }
+    }
+
+    /// Índices reales de favoritos visibles con el filtro actual (todos si
+    /// no hay filtro activo o está vacío).
+    pub fn visible_favorites(&self) -> Vec<usize> {
+        visible_indices(&self.favorites.tracks, &self.favorites_filter, &self.favorites_filter_state)
+    }
+
+    /// Pista de favoritos en la posición visible (doble indirección
+    /// visible→real). La selección del panel vive en coordenadas visibles.
+    pub fn favorite_at(&self, visible: usize) -> Option<Track> {
+        let real = self.visible_favorites().get(visible).copied()?;
+        self.favorites.tracks.get(real).cloned()
+    }
+
+    /// Índice real de favoritos correspondiente a una posición visible.
+    pub fn favorite_real_index(&self, visible: usize) -> Option<usize> {
+        self.visible_favorites().get(visible).copied()
+    }
+
+    /// Índices reales de pistas visibles del contenido de la playlist.
+    pub fn visible_content(&self, playlist: usize) -> Vec<usize> {
+        let Some(pl) = self.playlists.items.get(playlist) else {
+            return Vec::new();
+        };
+        visible_indices(&pl.tracks, &self.content_filter, &self.content_filter_state)
+    }
+
+    /// Índice real de la pista en la posición visible del contenido.
+    pub fn content_real_index(&self, playlist: usize, visible: usize) -> Option<usize> {
+        self.visible_content(playlist).get(visible).copied()
+    }
+
+    /// Pista del contenido en la posición visible.
+    pub fn content_at(&self, playlist: usize, visible: usize) -> Option<Track> {
+        let real = self.content_real_index(playlist, visible)?;
+        self.playlists.items.get(playlist)?.tracks.get(real).cloned()
+    }
+
+    /// Selección de contenido clampeada a la lista visible.
+    pub fn content_select(&mut self, playlist: usize, index: usize) {
+        let len = self.visible_content(playlist).len();
+        if len > 0 {
+            self.overlay_content_state.select(Some(index.min(len - 1)));
         }
     }
 
@@ -541,15 +624,9 @@ impl App {
     }
 
     pub fn overlay_content_select(&mut self, playlist: usize, index: usize) {
-        let len = self
-            .playlists
-            .items
-            .get(playlist)
-            .map_or(0, |p| p.tracks.len());
-        if len > 0 {
-            self.overlay_content_state
-                .select(Some(index.min(len - 1)));
-        }
+        // Delega en content_select: la selección vive en coordenadas visibles
+        // (filtradas) desde la fase 22.
+        self.content_select(playlist, index);
     }
 
     pub(super) fn save_playlists(&mut self) {
@@ -824,6 +901,29 @@ impl App {
     }
 }
 
+/// Índices de `tracks` que cumplen el filtro (subcadena insensible a mayús-
+/// culas en título/artista). Sin filtro activo o con filtro vacío, todos.
+fn visible_indices(
+    tracks: &[Track],
+    filter: &str,
+    state: &FilterState,
+) -> Vec<usize> {
+    let active = !matches!(state, FilterState::Off) && !filter.is_empty();
+    if !active {
+        return (0..tracks.len()).collect();
+    }
+    let needle = filter.to_lowercase();
+    tracks
+        .iter()
+        .enumerate()
+        .filter(|(_, track)| {
+            track.title.to_lowercase().contains(&needle)
+                || track.artist.to_lowercase().contains(&needle)
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -871,6 +971,96 @@ mod tests {
         app.history_prev();
         app.history_next();
         assert_eq!(app.input, "texto");
+    }
+
+    fn track_named(id: &str, title: &str, artist: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            duration: None,
+            source_url: format!("https://example.com/{id}"),
+            provider: ProviderKind::Youtube,
+        }
+    }
+
+    #[test]
+    fn filter_matches_title_or_artist_case_insensitive() {
+        let tracks = vec![
+            track_named("a", "One More Time", "Daft Punk"),
+            track_named("b", "Harder Better", "daft punk"),
+            track_named("c", "Bohemian Rhapsody", "Queen"),
+        ];
+        // Título (insensible a mayúsculas).
+        assert_eq!(
+            visible_indices(&tracks, "one", &FilterState::Applied),
+            vec![0]
+        );
+        // Artista.
+        assert_eq!(
+            visible_indices(&tracks, "DAFT", &FilterState::Applied),
+            vec![0, 1]
+        );
+        // Sin coincidencias.
+        assert!(visible_indices(&tracks, "zzzz", &FilterState::Applied).is_empty());
+        // Filtro vacío o Off: todo visible.
+        assert_eq!(visible_indices(&tracks, "", &FilterState::Applied).len(), 3);
+        assert_eq!(visible_indices(&tracks, "one", &FilterState::Off).len(), 3);
+    }
+
+    #[test]
+    fn favorites_visible_mapping_round_trips() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-filter-map-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        let mut app = App::with_data_dir(&Config::default(), &dir).unwrap();
+        app.favorites.add(track_named("a", "One More Time", "Daft Punk"));
+        app.favorites.add(track_named("b", "Bohemian", "Queen"));
+        app.favorites.add(track_named("c", "Around the World", "Daft Punk"));
+
+        // Sin filtro: identidad.
+        assert_eq!(app.visible_favorites(), vec![0, 1, 2]);
+        assert_eq!(app.favorite_at(1).unwrap().id, "b");
+
+        // Filtrando «daft»: las posiciones visibles 0/1 son las reales 0/2.
+        app.favorites_filter = "daft".to_string();
+        app.favorites_filter_state = FilterState::Applied;
+        assert_eq!(app.visible_favorites(), vec![0, 2]);
+        assert_eq!(app.favorite_at(0).unwrap().id, "a");
+        assert_eq!(app.favorite_at(1).unwrap().id, "c");
+        assert_eq!(app.favorite_real_index(1), Some(2));
+        assert_eq!(app.favorite_real_index(2), None);
+
+        // La selección se clampea a la lista visible.
+        app.favorites_select(usize::MAX);
+        assert_eq!(app.favorites_state.selected(), Some(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn content_visible_mapping_with_filter() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-filter-content-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        let mut app = App::with_data_dir(&Config::default(), &dir).unwrap();
+        let pl = app.playlists.create("mix").unwrap();
+        app.playlists.add_track(pl, track_named("a", "Alpha", "X"));
+        app.playlists.add_track(pl, track_named("b", "Beta", "Y"));
+        app.playlists.add_track(pl, track_named("c", "Alphabet", "Z"));
+
+        app.content_filter = "alp".to_string();
+        app.content_filter_state = FilterState::Applied;
+        assert_eq!(app.visible_content(pl), vec![0, 2]);
+        assert_eq!(app.content_at(pl, 1).unwrap().id, "c");
+        assert_eq!(app.content_real_index(pl, 1), Some(2));
+        // Selección clampeada a la visible.
+        app.content_select(pl, usize::MAX);
+        assert_eq!(app.overlay_content_state.selected(), Some(1));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

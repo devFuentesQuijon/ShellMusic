@@ -7,6 +7,7 @@ En el primer arranque se crea `config.toml` en la ruta nativa de configuración 
 results_per_search = 15   # 1-50
 providers = ["youtube", "soundcloud", "bandcamp"]   # proveedores habilitados; la tecla m cicla entre ellos
 default_provider = "youtube"            # proveedor activo al arrancar (debe estar en la lista)
+mouse = true                # ratón: click en la barra = seek · rueda = volumen · click en panel = foco (false deja la selección de texto del terminal)
 
 [audio]
 initial_volume = 70       # 0-100
@@ -39,6 +40,7 @@ media_controls = true   # MPRIS en Linux; ver «Integración con el sistema»
 ```
 
 - Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
+- `[general] mouse = false` desactiva la captura de ratón si prefieres la selección de texto del terminal; con el ratón activo, click en la barra del reproductor = seek, rueda = volumen y click en panel = foco/selección.
 - Pegar una URL en la búsqueda (YouTube `watch`/`youtu.be`/playlist/shorts, SoundCloud pista o `on.soundcloud.com`, Bandcamp pista/álbum/página de artista) la resuelve yt-dlp directamente contra esa URL — una pista o los primeros `results_per_search` de una playlist/álbum — con el proveedor de la URL aunque no sea el activo. Cualquier otro texto se busca literal. Bandcamp no admite búsqueda de texto (yt-dlp no la implementa): el intento responde con una indicación de usar una URL.
 - `[audio] format` se pasa a mpv como `--ytdl-format`: elige el formato de extracción (p. ej. `bestaudio` para ahorrar ancho de banda, `worst` en conexiones malas); vacío mantiene el criterio por defecto de yt-dlp.
 - `[audio] gapless = true` reproduce la cola sin pausa entre pistas: al arrancar una pista, la siguiente se apila en mpv (`loadfile append` + `--gapless-audio`), que extrae su URL por adelantado. Si la cola cambia entre medias (borrado, movido, barajado), la transición se recarga con el comportamiento normal. El crossfade no está disponible: mpv no ofrece un filtro de crossfade usable entre pistas cargadas una a una.

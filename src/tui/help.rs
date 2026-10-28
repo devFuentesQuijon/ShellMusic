@@ -24,6 +24,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Enter", "reproducir selección"),
             ("a", "añadir a la cola"),
+            ("e", "encolar a continuación"),
             ("f", "marcar favorito"),
             ("A", "añadir a playlist"),
         ],
@@ -33,6 +34,8 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Enter", "reproducir pista"),
             ("d", "eliminar de la cola"),
+            ("e", "mover a continuación"),
+            ("w", "guardar cola como playlist"),
             ("J / K", "mover abajo / arriba"),
         ],
     ),
@@ -40,7 +43,9 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Favoritos",
         &[
             ("Enter / a", "reproducir / encolar"),
+            ("e", "encolar a continuación"),
             ("d / f", "quitar de favoritos"),
+            ("/", "filtrar la lista en vivo"),
         ],
     ),
     (
@@ -58,6 +63,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("PgUp / PgDn", "saltar una página en listas"),
             ("g / G", "inicio / fin de la lista"),
             ("/", "foco a búsqueda"),
+            (":", "paleta de comandos"),
             ("m", "cambiar proveedor"),
             ("r / R", "radio on/off · sub-modo"),
             ("P", "gestor de playlists"),
