@@ -27,6 +27,15 @@ impl ProviderKind {
             _ => None,
         }
     }
+
+    /// Nombre máquina estable del proveedor (config, protocolos).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Youtube => "youtube",
+            Self::Soundcloud => "soundcloud",
+            Self::Bandcamp => "bandcamp",
+        }
+    }
 }
 
 impl fmt::Display for ProviderKind {

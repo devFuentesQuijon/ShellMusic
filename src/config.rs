@@ -49,6 +49,9 @@ discord_client_id = \"\"   # override para forks; vacío = el ID embebido en el 
 enabled = false         # scrobbling de escucha a Last.fm
 api_key = \"\"             # créalas en https://www.last.fm/api/account/create
 secret = \"\"              # y autoriza con: smusic --lastfm-auth
+
+[mcp]
+enabled = false         # socket de control local para agentes de IA (cliente de referencia: smusic-mcp)
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -62,6 +65,7 @@ pub struct Config {
     pub theme: ThemeConfig,
     pub integrations: Integrations,
     pub lastfm: Lastfm,
+    pub mcp: Mcp,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -223,6 +227,14 @@ pub struct Lastfm {
     pub enabled: bool,
     pub api_key: String,
     pub secret: String,
+}
+
+/// Socket de control para agentes de IA (`[mcp]`, RF-63). Opt-in: el socket
+/// solo existe con `enabled = true` y la app en ejecución.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Mcp {
+    pub enabled: bool,
 }
 
 impl Config {

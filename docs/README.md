@@ -15,6 +15,7 @@ Guía completa del reproductor. El [README](../README.md) cubre instalación y u
 - [Configuración (`config.toml`) y temas](configuracion.md)
 - [Temas: colección Halloween](temas.md) — Dracula, Frankenstein, la novia, el hombre lobo, la momia, el hombre invisible, la laguna negra y Thriller
 - [Integración con el sistema](integracion-sistema.md) — notificaciones, MPRIS, matriz por SO
+- [ShellMusic para agentes de IA (MCP)](mcp.md) — socket de control opt-in y puente `smusic-mcp` para agentes
 
 ## Referencia
 

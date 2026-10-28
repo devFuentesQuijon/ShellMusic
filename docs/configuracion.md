@@ -44,6 +44,9 @@ discord_client_id = ""  # override para forks; vacío = el ID embebido en el bin
 enabled = false         # scrobbling de escucha a Last.fm
 api_key = ""             # créalas en https://www.last.fm/api/account/create
 secret = ""              # y autoriza con: smusic --lastfm-auth
+
+[mcp]
+enabled = false         # socket de control local para agentes de IA (cliente de referencia: smusic-mcp)
 ```
 
 - Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.

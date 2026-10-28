@@ -93,6 +93,17 @@ impl RadioMode {
         }
     }
 
+    /// Nombre máquina estable del sub-modo (config, protocolos).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Artista => "artista",
+            Self::Similares => "similares",
+            Self::Random => "random",
+            Self::RandomGenero => "random-genero",
+            Self::Rarezas => "rarezas",
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "artista" => Some(Self::Artista),
@@ -242,6 +253,27 @@ impl StatsView {
     }
 }
 
+/// Qué hacer con el resultado de la búsqueda que satisface una petición del
+/// socket de control (RF-63) cuando llega su `SearchDone`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlAction {
+    /// Responder con la lista completa de resultados.
+    ReplyResults,
+    /// Reproducir la primera coincidencia (vía `autoplay_first`) y responder
+    /// con ella.
+    PlayFirst,
+    /// Encolar la primera coincidencia y responder con ella.
+    QueueFirst,
+}
+
+/// Petición del socket de control esperando la respuesta asíncrona de una
+/// búsqueda, identificada por su epoch (RF-63).
+pub struct ControlPending {
+    pub epoch: u64,
+    pub reply: tokio::sync::oneshot::Sender<serde_json::Value>,
+    pub action: ControlAction,
+}
+
 #[derive(Debug, Clone)]
 pub enum NameContext {
     /// Creación desde la lista de playlists.
@@ -379,6 +411,9 @@ pub struct App {
     /// Con `--play <búsqueda>`: al llegar el primer SearchDone se reproduce
     /// la primera coincidencia automáticamente.
     pub autoplay_first: bool,
+    /// Petición del socket de control esperando el resultado asíncrono de
+    /// su búsqueda (RF-63). Solo puede haber una a la vez.
+    pub control_pending: Option<ControlPending>,
 }
 
 impl App {
@@ -519,6 +554,7 @@ impl App {
             last_periodic_save: None,
             stats_dirty: false,
             autoplay_first: false,
+            control_pending: None,
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));

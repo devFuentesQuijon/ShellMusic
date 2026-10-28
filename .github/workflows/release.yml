@@ -17,12 +17,15 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: smusic-linux-x86_64
+            mcp_artifact: smusic-mcp-linux-x86_64
             binary: smusic
           - os: macos-latest
             artifact: smusic-macos-aarch64
+            mcp_artifact: smusic-mcp-macos-aarch64
             binary: smusic
           - os: windows-latest
             artifact: smusic-windows-x86_64.exe
+            mcp_artifact: smusic-mcp-windows-x86_64.exe
             binary: smusic.exe
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -36,15 +39,18 @@ jobs:
       - name: Build release
         run: cargo build --release --locked
 
-      - name: Empaquetar binario
+      - name: Empaquetar binarios
         shell: bash
         run: |
           mkdir -p dist
           cp "target/release/${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
-          chmod +x "dist/${{ matrix.artifact }}" || true
+          cp "target/release/smusic-mcp" "dist/${{ matrix.mcp_artifact }}"
+          chmod +x "dist/${{ matrix.artifact }}" "dist/${{ matrix.mcp_artifact }}" || true
           ls -la dist
 
       - name: Publicar en GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: dist/${{ matrix.artifact }}
+          files: |
+            dist/${{ matrix.artifact }}
+            dist/${{ matrix.mcp_artifact }}

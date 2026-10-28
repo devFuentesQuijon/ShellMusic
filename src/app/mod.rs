@@ -9,12 +9,14 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::config::Config;
+use crate::control::ControlRequest;
 use crate::player::{Player, PlayerEvent, PlayerNotice};
 use crate::providers::{MusicProvider, ProviderKind, Track};
 use crate::system::{MediaCommand, SystemIntegration};
 use crate::tui;
 
 pub(crate) mod commands;
+mod control;
 mod input;
 mod playback;
 mod state;
@@ -115,6 +117,21 @@ pub async fn run(
         app.message = Some(Message::info(warning));
     }
 
+    // Socket de control para agentes de IA (RF-63): opt-in `[mcp] enabled`.
+    // Si no se pudo crear (otra instancia activa, sin permisos) la app sigue
+    // funcionando sin control; el puente MCP informará de ello al conectar.
+    let mut control_rx: Option<mpsc::UnboundedReceiver<ControlRequest>> = None;
+    if config.mcp.enabled {
+        let (control_tx, rx) = mpsc::unbounded_channel::<ControlRequest>();
+        match crate::control::spawn_server(control_tx).await {
+            Ok(()) => control_rx = Some(rx),
+            Err(err) => {
+                app.message =
+                    Some(Message::info(format!("control para agentes desactivado: {err:#}")));
+            }
+        }
+    }
+
     // Título de la pestaña: «ShellMusic» en reposo, pista en reproducción.
     let mut last_title = String::new();
     set_tab_title(APP_TITLE, &mut last_title);
@@ -153,6 +170,7 @@ pub async fn run(
                 }
             }
             _ = tick => {
+                playback::release_stale_control_pending(&mut app);
                 periodic_save(&mut app);
                 if !player_respawning
                     && let Ok(status) = player.status().await
@@ -177,6 +195,13 @@ pub async fn run(
             }
             Some(command) = media_rx.recv() => {
                 handle_media_command(&mut app, command, &player, &tx);
+                needs_redraw = true;
+            }
+            // Peticiones del socket de control (agentes de IA). La respuesta
+            // viaja por el oneshot del propio request: inmediata, o diferida
+            // al SearchDone para las que implican búsqueda.
+            Some(request) = async { match control_rx.as_mut() { Some(rx) => rx.recv().await, None => std::future::pending().await } } => {
+                control::handle(&mut app, &player, &tx, request);
                 needs_redraw = true;
             }
             Some(event) = player_events.recv() => {

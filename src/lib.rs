@@ -1,6 +1,7 @@
 pub mod app;
 pub mod browsers;
 pub mod config;
+pub mod control;
 pub mod discord;
 pub mod favorites;
 pub mod history;

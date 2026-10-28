@@ -20,6 +20,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Estadísticas de escucha** (`t`) con top de pistas, artistas e **historial cronológico**; **letras** (`L`, vía lrclib.net), panel **«sonando ahora»** con carátula (`i`) y autocompletado de búsqueda desde tu historial.
 - **Portabilidad** (`X`/`I`): exporta e importa playlists y favoritos (JSON/M3U).
 - **Integración con el sistema**: notificaciones de escritorio **con carátula**, MPRIS en Linux (teclas multimedia, widgets, KDE Connect), **presencia en Discord** y **scrobbling Last.fm** (`smusic --lastfm-auth`).
+- **Agentes de IA**: socket de control local opt-in (`[mcp] enabled`) y puente **MCP** (`smusic-mcp`): busca, reproduce y gestiona la cola desde Claude Code y otros agentes ([docs/mcp.md](docs/mcp.md)).
 - **Temas de color** configurables y **título de pestaña** con la pista en reproducción.
 - **Robusta**: defensas anti-bot de YouTube en cadena (rotación de clientes, cookies, PO Token), auto-respawn de mpv y reintentos ante fallos transitorios.
 - **Interfaz a tu manera**: **ratón** (click en la barra = seek, rueda = volumen), **paleta de comandos** con `:` (`vol 80`, `theme dracula`…) y atajos descubribles con `?`.
@@ -30,7 +31,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 
 ### Opción 1: binario precompilado
 
-Descarga el binario para tu SO desde [GitHub Releases](https://github.com/devFuentesQuijon/ShellMusic/releases) (`smusic-linux-x86_64`, `smusic-macos-aarch64`, `smusic-windows-x86_64.exe`), dale permiso de ejecución (`chmod +x`) y ponlo en tu `PATH`.
+Descarga el binario para tu SO desde [GitHub Releases](https://github.com/devFuentesQuijon/ShellMusic/releases) (`smusic-linux-x86_64`, `smusic-macos-aarch64`, `smusic-windows-x86_64.exe`), dale permiso de ejecución (`chmod +x`) y ponlo en tu `PATH`. Cada release incluye también `smusic-mcp-<plataforma>`, el [puente MCP para agentes de IA](docs/mcp.md) (opcional; solo sirve con la app en ejecución).
 
 ### Opción 2: compilar
 
@@ -77,7 +78,7 @@ La guía completa vive en [`docs/`](docs/README.md):
 - **Manual**: `man smusic` — página de manual en `docs/smusic.1` (instalación: `sudo cp docs/smusic.1 /usr/local/share/man/man1/`)
 - [Atajos de teclado](docs/atajos.md) · [Cola, repetición y radio](docs/cola-y-radio.md) · [Playlists y favoritos](docs/playlists.md)
 - [Configuración y temas](docs/configuracion.md) · [Integración con el sistema](docs/integracion-sistema.md)
-- [Portabilidad y estadísticas](docs/portabilidad.md) · [Descubrimiento](docs/descubrimiento.md)
+- [ShellMusic para agentes de IA (MCP)](docs/mcp.md) · [Portabilidad y estadísticas](docs/portabilidad.md) · [Descubrimiento](docs/descubrimiento.md)
 - [Bloqueo anti-bot de YouTube](docs/anti-bot.md) · [Aviso legal](docs/legal.md) · [Desarrollo](docs/desarrollo.md)
 
 ## Licencia

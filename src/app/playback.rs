@@ -10,7 +10,25 @@ use crate::providers::{MusicProvider, ProviderKind, Track, provider_for_url};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
-use super::state::{App, Focus, Message, RadioMode, RepeatMode};
+use super::state::{App, ControlAction, Focus, Message, RadioMode, RepeatMode};
+
+/// Libera la petición de control pendiente si una búsqueda más reciente (de
+/// la UI o de otra petición) dejó su epoch obsoleto: el cliente recibe error
+/// en lugar de quedarse esperando un resultado que nunca llegará. La llama
+/// `handle_msg` y el tick periódico del bucle principal.
+pub(super) fn release_stale_control_pending(app: &mut App) {
+    let stale = app
+        .control_pending
+        .as_ref()
+        .is_some_and(|pending| pending.epoch != app.search_epoch);
+    if stale
+        && let Some(pending) = app.control_pending.take()
+    {
+        let _ = pending
+            .reply
+            .send(crate::control::fail("la búsqueda fue reemplazada por otra más reciente"));
+    }
+}
 
 pub(super) fn handle_msg(
     app: &mut App,
@@ -18,6 +36,7 @@ pub(super) fn handle_msg(
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
+    release_stale_control_pending(app);
     match msg {
         AppMsg::SearchDone(epoch, Ok(tracks)) => {
             // Resultado de una búsqueda anterior: no sobrescribe la actual.
@@ -28,6 +47,11 @@ pub(super) fn handle_msg(
             if tracks.is_empty() {
                 app.autoplay_first = false;
                 app.message = Some(Message::info("sin resultados"));
+                if let Some(pending) = app.control_pending.take() {
+                    let _ = pending
+                        .reply
+                        .send(crate::control::ok(serde_json::json!({ "results": [] })));
+                }
             } else {
                 app.message = None;
                 app.results = tracks;
@@ -38,6 +62,28 @@ pub(super) fn handle_msg(
                     app.autoplay_first = false;
                     play_result(app, player, tx, 0);
                 }
+                // Petición de control (MCP) esperando este resultado.
+                if let Some(pending) = app.control_pending.take() {
+                    let response = match pending.action {
+                        ControlAction::QueueFirst => {
+                            let track = app.results[0].clone();
+                            app.queue.add(track.clone());
+                            crate::control::ok(serde_json::json!({
+                                "queued": crate::control::track_json(&track)
+                            }))
+                        }
+                        ControlAction::ReplyResults => crate::control::ok(
+                            serde_json::json!({ "results": crate::control::tracks_json(&app.results) }),
+                        ),
+                        ControlAction::PlayFirst => {
+                            // autoplay_first ya reprodujo la primera (arriba).
+                            crate::control::ok(serde_json::json!({
+                                "playing": crate::control::track_json(&app.results[0])
+                            }))
+                        }
+                    };
+                    let _ = pending.reply.send(response);
+                }
             }
         }
         AppMsg::SearchDone(epoch, Err(err)) => {
@@ -46,7 +92,10 @@ pub(super) fn handle_msg(
             }
             app.searching = false;
             app.autoplay_first = false;
-            app.message = Some(Message::error(err));
+            app.message = Some(Message::error(err.clone()));
+            if let Some(pending) = app.control_pending.take() {
+                let _ = pending.reply.send(crate::control::fail(err));
+            }
         }
         AppMsg::Error(err) => app.message = Some(Message::error(err)),
         AppMsg::LyricsDone(result) => {

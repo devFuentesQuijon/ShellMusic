@@ -21,6 +21,7 @@ más tarde o revisa docs/anti-bot.md.
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -577,6 +578,116 @@ def run_fase21_integrations(binary):
     ui.close()
 
 
+def run_fase23_mcp(binary):
+    """Fase 23: puente MCP (smusic-mcp) sobre el socket de control.
+
+    Primero contra el vacío: handshake y tools/list funcionan sin app, y un
+    tools/call informa el error de conexión (isError con mensaje accionable).
+    Después contra la app en ejecución con [mcp] enabled: now_playing,
+    control (vol), búsqueda, queue_add y queue_list por el socket real.
+    Los textos de tool son JSON compacto (serde_json::Value::to_string).
+    """
+    mcp = str(Path(binary).with_name("smusic-mcp"))
+    if not Path(mcp).exists():
+        check("fase 23: binario smusic-mcp compilado", False, f"({mcp})")
+        return
+
+    def rpc(child, request, timeout=45):
+        child.sendline(json.dumps(request))
+        idx = child.expect([r"\r?\n", pexpect.EOF, pexpect.TIMEOUT], timeout=timeout)
+        if idx != 0:
+            return None
+        try:
+            return json.loads(child.before.strip())
+        except ValueError:
+            return None
+
+    def tool_text(resp):
+        if not resp or "result" not in resp:
+            return ""
+        return resp["result"].get("content", [{}])[0].get("text", "")
+
+    # ── Puente sin app: handshake y error accionable ────────────────
+    # echo=False: el PTY reenvía lo escrito; sin esto el primer «\n» que
+    # ve expect es el eco de nuestra propia petición y las respuestas se
+    # desalinean una posición.
+    child = pexpect.spawn(mcp, encoding="utf-8", timeout=45, cwd=str(REPO_ROOT),
+                          echo=False)
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                       "params": {"protocolVersion": "2024-11-05", "capabilities": {}}})
+    server = (resp or {}).get("result", {}).get("serverInfo", {}).get("name", "")
+    check("fase 23: MCP initialize responde", server == "shellmusic-mcp", f"({server or 'sin respuesta'})")
+    child.sendline(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+    silent = child.expect([pexpect.TIMEOUT, r"\r?\n"], timeout=2) == 0
+    check("fase 23: notificación no recibe respuesta", silent)
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    tools = (resp or {}).get("result", {}).get("tools", [])
+    check("fase 23: tools/list declara 13 tools", len(tools) == 13, f"({len(tools)})")
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                       "params": {"name": "now_playing", "arguments": {}}})
+    text = tool_text(resp)
+    check("fase 23: tools/call sin app = isError accionable",
+          bool(resp and resp.get("result", {}).get("isError") and "smusic en ejecución" in text),
+          f"({text[:70]})")
+    child.close()
+
+    # ── Contra la app en ejecución con [mcp] enabled ────────────────
+    env = make_env()
+    env["XDG_RUNTIME_DIR"] = os.path.join(
+        tempfile.gettempdir(), f"smusic_e2e_rt_{os.getpid()}_{len(results)}")
+    os.makedirs(env["XDG_RUNTIME_DIR"], exist_ok=True)
+    cfg_dir = os.path.join(env["XDG_CONFIG_HOME"], "shellmusic")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "config.toml"), "w") as f:
+        # Notificaciones off: sin D-Bus en CI las notis fallarían.
+        f.write("[mcp]\nenabled = true\n"
+                "[integrations]\nnotifications = false\nmedia_controls = false\n")
+    ui = Ui(env, binary)
+    found = ui.wait_for(r"Buscar en YouTube \(Enter: buscar", 15)
+    check("fase 23: app con [mcp] enabled arranca", found)
+    if not found:
+        ui.close()
+        return
+
+    child = pexpect.spawn(mcp, encoding="utf-8", timeout=60, cwd=str(REPO_ROOT), env=env,
+                          echo=False)
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 10, "method": "tools/call",
+                       "params": {"name": "now_playing", "arguments": {}}})
+    text = tool_text(resp)
+    check("fase 23: now_playing vía app",
+          bool(resp and "isError" not in resp.get("result", {}) and '"queue_len":0' in text),
+          f"({text[:70]})")
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 11, "method": "tools/call",
+                       "params": {"name": "control", "arguments": {"command": "vol 42"}}})
+    check("fase 23: control (vol 42) vía app",
+          bool(resp and "isError" not in resp.get("result", {})))
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 12, "method": "tools/call",
+                       "params": {"name": "search", "arguments": {"query": "daft punk"}}})
+    text = tool_text(resp)
+    check("fase 23: búsqueda MCP devuelve resultados",
+          bool(resp and '"results":[' in text and '"title":"' in text),
+          f"({text[:70]})")
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 13, "method": "tools/call",
+                       "params": {"name": "queue_add", "arguments": {"query": "daft punk one more time"}}})
+    text = tool_text(resp)
+    check("fase 23: queue_add encola la primera coincidencia",
+          bool(resp and '"queued":{' in text), f"({text[:70]})")
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 14, "method": "tools/call",
+                       "params": {"name": "queue_list", "arguments": {}}})
+    text = tool_text(resp)
+    check("fase 23: queue_list refleja la cola",
+          bool(resp and '"tracks":[{' in text), f"({text[:70]})")
+    resp = rpc(child, {"jsonrpc": "2.0", "id": 15, "method": "tools/call",
+                       "params": {"name": "queue_play", "arguments": {"index": 0}}})
+    text = tool_text(resp)
+    check("fase 23: queue_play reproduce el índice pedido",
+          bool(resp and "reproduciendo" in text), f"({text[:70]})")
+    child.close()
+    ui.send("q")
+    ui.pump(0.5)
+    ui.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--binary", default=str(REPO_ROOT / "target/release/smusic"),
@@ -595,6 +706,7 @@ def main():
     run_cli_flags(binary)
     run_fase20_gapless(binary)
     run_fase21_integrations(binary)
+    run_fase23_mcp(binary)
     if args.dumb_startup:
         run_dumb_startup(binary)
 
