@@ -42,6 +42,13 @@ progress = \"green\"     # barra de progreso
 [integrations]
 notifications = true    # notificación de escritorio al cambiar de pista
 media_controls = true   # MPRIS en Linux: teclas multimedia, widgets, KDE Connect
+discord = false         # presencia en Discord («escuchando: …»); requiere el cliente Discord abierto
+discord_client_id = \"\"   # override para forks; vacío = el ID embebido en el binario
+
+[lastfm]
+enabled = false         # scrobbling de escucha a Last.fm
+api_key = \"\"             # créalas en https://www.last.fm/api/account/create
+secret = \"\"              # y autoriza con: smusic --lastfm-auth
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -54,6 +61,7 @@ pub struct Config {
     pub radio: Radio,
     pub theme: ThemeConfig,
     pub integrations: Integrations,
+    pub lastfm: Lastfm,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,6 +195,12 @@ pub struct Integrations {
     pub notifications: bool,
     /// Controles multimedia del SO (MPRIS; solo tiene efecto en Linux).
     pub media_controls: bool,
+    /// Presencia en Discord («escuchando: …») vía IPC local. Requiere el
+    /// cliente de Discord abierto.
+    pub discord: bool,
+    /// Override del Application ID para forks; vacío = el embebido en el
+    /// binario (los usuarios no necesitan crear nada).
+    pub discord_client_id: String,
 }
 
 impl Default for Integrations {
@@ -194,8 +208,21 @@ impl Default for Integrations {
         Self {
             notifications: true,
             media_controls: true,
+            discord: false,
+            discord_client_id: String::new(),
         }
     }
+}
+
+/// Scrobbling de Last.fm (`[lastfm]`). La sesión autorizada se guarda en
+/// `lastfm.json` en el directorio de datos (vía `smusic --lastfm-auth`);
+/// estos tres campos viven en config.toml.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct Lastfm {
+    pub enabled: bool,
+    pub api_key: String,
+    pub secret: String,
 }
 
 impl Config {

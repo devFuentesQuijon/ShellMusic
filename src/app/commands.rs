@@ -89,12 +89,7 @@ fn pause(_: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMs
 }
 
 fn stop(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, _: &str) {
-    app.queue.current = None;
-    app.radio_epoch += 1;
-    app.playback_active = false;
-    app.mpv_appended = None;
-    app.message = Some(Message::info("detenido"));
-    spawn_player(player, tx, |p| async move { p.stop().await });
+    super::playback::stop_playback(app, player, tx);
 }
 
 fn next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, _: &str) {

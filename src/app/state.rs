@@ -303,6 +303,19 @@ pub struct App {
     pub playback_active: bool,
     /// `[audio] gapless`: se apila la siguiente pista de la cola en mpv.
     pub gapless: bool,
+    /// Cliente de scrobbling Last.fm: Some cuando `[lastfm] enabled` y hay
+    /// clave y sesión guardada (`lastfm.json`); el alta es `--lastfm-auth`.
+    pub lastfm: Option<crate::lastfm::Client>,
+    /// Pista sonando con su inicio, para el scrobble de Last.fm. Van unidas:
+    /// el scrobble siempre refiere a la pista que se empezó, no a la que la
+    /// cola diga «current» ahora (puede haber cambiado ya).
+    pub playing: Option<(Track, std::time::SystemTime)>,
+    /// Posición máxima alcanzada por la pista sonando: el scrobble exige
+    /// min(30 s, mitad de duración) para no contar skips como escuchas.
+    pub playing_peak: std::time::Duration,
+    /// Pista que se está cargando con su inicio tentativo; se confirma en
+    /// `PlaybackStarted` (mpv confirmó) y entonces se reinicia el peak.
+    pub pending_start: Option<(Track, std::time::SystemTime)>,
     /// Clave (provider, id) de la pista apilada en la playlist interna de mpv
     /// (gapless). Se verifica al llegar TrackEnded; cualquier carga con
     /// `replace` (salto del usuario, stop, restore…) lo deja a None.
@@ -346,6 +359,18 @@ pub struct App {
     pub cover: Option<ratatui_image::protocol::StatefulProtocol>,
     /// Pista (provider, id) de la carátula cacheada.
     pub cover_for: Option<(ProviderKind, String)>,
+    /// Pista cuya carátula ya está guardada en `cover_png_path` (lista para
+    /// la notificación con imagen). `cover_failed_for` = fetch intentado y
+    /// fallido: la notificación se manda sin imagen.
+    pub cover_ready_for: Option<(ProviderKind, String)>,
+    pub cover_failed_for: Option<(ProviderKind, String)>,
+    /// Notificación esperando la carátula de esta pista (se resuelve en el
+    /// próximo `SystemIntegration::update` cuando el fetch terminó).
+    pub notify_pending: Option<(ProviderKind, String)>,
+    /// Ruta del PNG de carátula para las notificaciones (en el data dir).
+    pub cover_png_path: std::path::PathBuf,
+    /// Directorio de datos (favoritos, sesión… y el PNG de notificación).
+    pub data_dir: std::path::PathBuf,
     /// Último guardado periódico de sesión/estadísticas (acota la pérdida
     /// ante un kill -9 a ~30 s).
     pub last_periodic_save: Option<std::time::Instant>,
@@ -381,6 +406,34 @@ impl App {
         let (stats, stats_warning) = Stats::load(&stats_path)
             .with_context(|| format!("no se pudieron leer {}", stats_path.display()))?;
         let (theme, theme_warning) = Theme::resolve(&config.theme);
+        // Last.fm: solo se construye el cliente si todo está listo; si no,
+        // un aviso en el arranque explica qué falta (nunca impide arrancar).
+        let (lastfm, lastfm_warning) = if config.lastfm.enabled {
+            match crate::lastfm::Session::load(data_dir) {
+                Some(session) => match crate::lastfm::Client::new(
+                    &config.lastfm.api_key,
+                    &config.lastfm.secret,
+                    &session,
+                ) {
+                    Ok(client) => (Some(client), None),
+                    Err(err) => (
+                        None,
+                        Some(format!(
+                            "Last.fm desactivado: {err:#} (revisa [lastfm] en config.toml)"
+                        )),
+                    ),
+                },
+                None => (
+                    None,
+                    Some(
+                        "Last.fm activado sin sesión: configura api_key/secret y ejecuta `smusic --lastfm-auth`"
+                            .to_string(),
+                    ),
+                ),
+            }
+        } else {
+            (None, None)
+        };
         let mut app = Self {
             focus: Focus::Searching,
             input: String::new(),
@@ -413,6 +466,7 @@ impl App {
                 .or(sess_warning)
                 .or(stats_warning)
                 .or(theme_warning)
+                .or(lastfm_warning)
                 .map(Message::error),
             searching: false,
             should_quit: false,
@@ -432,6 +486,10 @@ impl App {
             playback_active: false,
             gapless: config.audio.gapless,
             mpv_appended: None,
+            lastfm,
+            playing: None,
+            playing_peak: std::time::Duration::ZERO,
+            pending_start: None,
             results_limit: config.general.results_per_search,
             favorites_path,
             playlists_path,
@@ -453,6 +511,11 @@ impl App {
             picker: None,
             cover: None,
             cover_for: None,
+            cover_ready_for: None,
+            cover_failed_for: None,
+            notify_pending: None,
+            cover_png_path: data_dir.join("cover-notification.png"),
+            data_dir: data_dir.to_path_buf(),
             last_periodic_save: None,
             stats_dirty: false,
             autoplay_first: false,

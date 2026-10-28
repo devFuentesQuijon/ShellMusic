@@ -532,6 +532,51 @@ def run_fase20_gapless(binary):
     ui.close()
 
 
+def run_fase21_integrations(binary):
+    """Fase 21: discord/lastfm sin credenciales avisan pero no rompen.
+
+    No hay Discord ni claves Last.fm en CI: solo se verifica que la app
+    arranca con ambos activados, muestra los avisos y el ciclo normal
+    (buscar → reproducir → pausar) sigue en verde.
+    """
+    env = make_env()
+    cfg_dir = os.path.join(env["XDG_CONFIG_HOME"], "shellmusic")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "config.toml"), "w") as f:
+        f.write(
+            "[integrations]\n"
+            "discord = true\n"
+            "notifications = false\n"   # sin D-Bus en CI las notis fallarían
+            "media_controls = false\n"
+            "[lastfm]\n"
+            "enabled = true\n"
+            'api_key = ""\n'
+            'secret = ""\n'
+        )
+
+    ui = Ui(env, binary)
+    found = ui.wait_for(r"Buscar en YouTube \(Enter: buscar", 15)
+    check("fase 21: arranque con discord+lastfm activos", found)
+    if found:
+        # Los dos avisos compiten por la línea de estado: el último gana.
+        # Esperamos a ver alguno; el otro se comprobó en unitarios.
+        warned = ui.wait_for(r"Application ID|Last\.fm", 5)
+        check("fase 21: aviso de discord/lastfm sin credenciales", warned,
+              f"({ui.text().splitlines()[-2][:60] if not warned else 'aviso visible'})")
+        ui.send("daft punk")
+        ui.pump(0.3)
+        ui.send("\r")
+        got = ui.wait_for(r"Resultados \(\d\d+\)", 30)
+        check("fase 21: búsqueda con integraciones activas", got)
+        if got:
+            ui.send("\r")
+            playing = ui.wait_for(r"▶ .*cola 1/1", 45)
+            check("fase 21: reproducción con integraciones activas", playing)
+    ui.send("q")
+    ui.pump(0.5)
+    ui.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--binary", default=str(REPO_ROOT / "target/release/smusic"),
@@ -549,6 +594,7 @@ def main():
     run_suite(binary)
     run_cli_flags(binary)
     run_fase20_gapless(binary)
+    run_fase21_integrations(binary)
     if args.dumb_startup:
         run_dumb_startup(binary)
 

@@ -1,8 +1,10 @@
 pub mod app;
 pub mod browsers;
 pub mod config;
+pub mod discord;
 pub mod favorites;
 pub mod history;
+pub mod lastfm;
 pub mod lyrics;
 pub mod player;
 pub mod playlists;

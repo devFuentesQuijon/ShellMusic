@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
@@ -56,18 +57,26 @@ pub(super) fn handle_msg(
             app.lyrics_scroll = 0;
         }
         AppMsg::CoverDone(Ok(cover)) => {
+            // PNG para la notificación con carátula (best-effort: si el
+            // disco falla, la notificación irá sin imagen).
+            save_notification_cover(&app.cover_png_path, &cover.image);
+            let key = cover.track;
+            app.cover_ready_for = Some(key.clone());
             if let Some(picker) = &app.picker {
                 app.cover = Some(picker.new_resize_protocol(cover.image));
-                app.cover_for = Some(cover.track);
+                app.cover_for = Some(key);
             }
         }
-        AppMsg::CoverDone(Err(_)) => {
-            // Sin carátula el panel funciona igual: el fallo es silencioso.
+        AppMsg::CoverDone(Err(err)) => {
+            // Sin carátula el panel funciona igual: el fallo solo resuelve
+            // la notificación pendiente (se manda sin imagen).
+            app.cover_failed_for = Some(err.track);
         }
         AppMsg::PlaybackStarted => {
             if app.message.as_ref().is_some_and(|m| !m.is_error) {
                 app.message = None;
             }
+            confirm_track_start(app, tx);
             gapless_append_next(app, player, tx);
         }
         AppMsg::RadioDone(artist, Ok(tracks), epoch) => {
@@ -241,6 +250,10 @@ pub(super) fn play_queue_track_from(
     // Un loadfile con replace (el modo por defecto) limpia la playlist
     // interna de mpv: la pista apilada para gapless ya no existe.
     app.mpv_appended = None;
+    // Marca el inicio tentativo: se confirma en PlaybackStarted. El
+    // scrobble de la pista anterior ocurre ahí (no aquí: aún no sabemos si
+    // esta carga arrancará).
+    mark_track_start(app);
     // Invalida cualquier expansión de radio en vuelo: hay reproducción nueva.
     app.radio_epoch += 1;
     app.playback_active = true;
@@ -264,6 +277,9 @@ pub(super) fn play_queue_track_from(
     )));
     // Persiste la cola al cambiar de pista: sobrevive a cierres abruptos.
     app.save_session(start);
+    // Carátula para la notificación con imagen (deduped internamente): se
+    // pide siempre al cambiar de pista, no solo al abrir el panel «i».
+    request_cover(app, tx);
     let url = app.queue.tracks[index].source_url.clone();
     let player = Arc::clone(player);
     let play_tx = tx.clone();
@@ -322,6 +338,8 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
         if app.gapless && appended_matches {
             gapless_advance(app, index);
             gapless_append_next(app, player, tx);
+            // Carátula de la nueva pista para la notificación con imagen.
+            request_cover(app, tx);
             radio_prefetch(app, tx);
             return;
         }
@@ -345,6 +363,8 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
 /// `append` antes de que terminara la anterior). Replica el bookkeeping de
 /// `play_queue_track_from` sin tocar el reproductor.
 fn gapless_advance(app: &mut App, index: usize) {
+    // La pista anterior ya sonó todo lo que iba a sonar: scrobble si toca.
+    scrobble_leaving_standalone(app);
     app.queue.current = Some(index);
     app.radio_epoch += 1;
     app.playback_active = true;
@@ -359,7 +379,26 @@ fn gapless_advance(app: &mut App, index: usize) {
     app.stats.record(&app.queue.tracks[index]);
     app.stats_dirty = true;
     app.queue_select(index);
+    // Gapless: mpv ya la está reproduciendo, el inicio es ahora mismo.
+    app.playing = Some((
+        app.queue.tracks[index].clone(),
+        std::time::SystemTime::now(),
+    ));
+    app.playing_peak = Duration::ZERO;
     app.save_session(None);
+}
+
+/// Scrobble sin canal de mensajes (para gapless, que no lo tiene a mano):
+/// los errores de sesión se dejan pasar silenciosos aquí; el siguiente
+/// confirm_track_start con tx los reportará si persisten.
+fn scrobble_leaving_standalone(app: &mut App) {
+    if app.lastfm.is_none() {
+        return;
+    }
+    // Reutiliza la lógica con un canal al que nadie escucha: los errores de
+    // re-autenticación se pierden en este camino, aceptado (ver docstring).
+    let (tx, _rx) = mpsc::unbounded_channel::<AppMsg>();
+    scrobble_leaving(app, &tx);
 }
 
 /// Gapless: apila en mpv la siguiente pista de la cola (`loadfile append`)
@@ -424,6 +463,76 @@ pub(super) fn seek_to(
     }
 }
 
+/// Reglas oficiales de Last.fm: la pista debe durar más de 30 s y haberse
+/// oído `min(30 s, mitad de la duración)` o más.
+pub(crate) fn scrobble_eligible(peak: Duration, dur: Duration) -> bool {
+    const MIN_LISTEN: Duration = Duration::from_secs(30);
+    dur > MIN_LISTEN && peak >= std::cmp::min(MIN_LISTEN, dur / 2)
+}
+
+/// Marca el inicio (tentativo) de la pista que se va a cargar. Se confirma
+/// al llegar `PlaybackStarted` (mpv realmente arrancó) y ahí se reinicia el
+/// peak de escucha y se avisa a Last.fm de «now playing».
+pub(super) fn mark_track_start(app: &mut App) {
+    app.pending_start = app
+        .queue
+        .current_track()
+        .map(|track| (track.clone(), std::time::SystemTime::now()));
+}
+
+/// Llegó la confirmación de mpv: la pista anterior (si la hay) ya terminó de
+/// sonar para efectos de scrobble; la nueva arranca ahora.
+pub(super) fn confirm_track_start(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
+    scrobble_leaving(app, tx);
+    app.playing = app.pending_start.take();
+    app.playing_peak = Duration::ZERO;
+    if let (Some(client), Some((track, _))) = (app.lastfm.clone(), &app.playing) {
+        let track = track.clone();
+        tokio::spawn(async move {
+            // nowPlaying es informativo: errores no molestan en la UI.
+            let _ = client.now_playing(&track).await;
+        });
+    }
+}
+
+/// Scrobble de la pista que deja de sonar (si cumple las reglas). Se llama
+/// en cada punto de salida: cambio de pista, stop y cierre de la app.
+pub(super) fn scrobble_leaving(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
+    let (Some(client), Some((track, started))) =
+        (app.lastfm.clone(), app.playing.clone())
+    else {
+        return;
+    };
+    let Ok(elapsed) = started.elapsed() else {
+        return;
+    };
+    // No scrobblar reinicios inmediatos ni datos absurdos.
+    if elapsed < Duration::from_secs(3) {
+        return;
+    }
+    let dur = track
+        .duration
+        .or(app.status.duration)
+        .unwrap_or(Duration::ZERO);
+    if !scrobble_eligible(app.playing_peak, dur) {
+        return;
+    }
+    let Ok(timestamp) = started.duration_since(std::time::UNIX_EPOCH) else {
+        return;
+    };
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        if let Err(err) = client.scrobble(&track, timestamp.as_secs()).await {
+            // Solo el error de sesión/clave merece interrumpir al usuario.
+            if err.contains("re-autentica") {
+                let _ = tx.send(AppMsg::Error(err));
+            }
+        }
+    });
+    app.playing = None;
+    app.playing_peak = Duration::ZERO;
+}
+
 /// S: baraja la cola manteniendo la pista que suena en su sitio.
 pub(super) fn shuffle_queue(app: &mut App) {
     if app.queue.len() < 2 {
@@ -432,6 +541,25 @@ pub(super) fn shuffle_queue(app: &mut App) {
     }
     app.queue.shuffle();
     app.message = Some(Message::info("cola barajada"));
+}
+
+/// Stop completo (tecla s, comando `stop`, MPRIS Stop): scrobblea lo
+/// escuchado, limpia el estado y para el reproductor.
+pub(super) fn stop_playback(
+    app: &mut App,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
+    scrobble_leaving(app, tx);
+    app.queue.current = None;
+    app.radio_epoch += 1;
+    app.playback_active = false;
+    app.mpv_appended = None;
+    app.playing = None;
+    app.playing_peak = Duration::ZERO;
+    app.pending_start = None;
+    app.message = Some(Message::info("detenido"));
+    spawn_player(player, tx, |p| async move { p.stop().await });
 }
 
 const RADIO_TRACKS: usize = 5;
@@ -715,7 +843,9 @@ pub(super) fn request_cover(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
         return;
     }
     let key = (track.provider, track.id.clone());
-    if app.cover_for.as_ref() == Some(&key) {
+    // Dedup amplio: vale la imagen en memoria (panel) o el PNG ya en disco
+    // (notificación); en ambos casos no hace falta volver a descargar.
+    if app.cover_for.as_ref() == Some(&key) || app.cover_ready_for.as_ref() == Some(&key) {
         return;
     }
     let url = format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", track.id);
@@ -738,10 +868,26 @@ pub(super) fn request_cover(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
         }
         .await;
         let _ = tx.send(AppMsg::CoverDone(result.map(|image| super::CoverImage {
-            track: key,
+            track: key.clone(),
             image,
+        }).map_err(|message| super::CoverError {
+            message,
+            track: key,
         })));
     });
+}
+
+/// Escribe la carátula como PNG para la notificación con imagen
+/// (`Hint::ImagePath`). Best-effort: un fallo de disco solo deja la
+/// notificación sin imagen.
+fn save_notification_cover(path: &std::path::Path, dynamic: &image::DynamicImage) {
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    if dynamic
+        .write_to(&mut buffer, image::ImageFormat::Png)
+        .is_ok()
+    {
+        let _ = std::fs::write(path, buffer.into_inner());
+    }
 }
 
 /// Tecla L: overlay de letras para la pista dada (o la que suena).
@@ -956,6 +1102,21 @@ mod tests {
         // como estaba y no se encola nada.
         assert_eq!(app.queue.len(), 1);
         assert_eq!(app.queue.current, Some(0));
+    }
+
+    #[test]
+    fn scrobble_rules_match_lastfm_policy() {
+        let s = Duration::from_secs;
+        // Pista de 200 s: oírla 30 s basta (min(30, 100)).
+        assert!(scrobble_eligible(s(30), s(200)));
+        assert!(!scrobble_eligible(s(29), s(200)));
+        // Pista corta (20 s): nunca scrobble (debe durar >30 s).
+        assert!(!scrobble_eligible(s(20), s(20)));
+        // Pista de 40 s: hace falta la mitad (20 s), no 30.
+        assert!(scrobble_eligible(s(20), s(40)));
+        assert!(!scrobble_eligible(s(19), s(40)));
+        // Duración desconocida (0): no scrobble.
+        assert!(!scrobble_eligible(s(60), Duration::ZERO));
     }
 
     #[tokio::test]

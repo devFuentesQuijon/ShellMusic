@@ -36,6 +36,8 @@ pub struct SystemIntegration {
     notifications: bool,
     #[cfg(target_os = "linux")]
     controls: Option<MediaControls>,
+    /// Presencia en Discord: se alimenta en `update` con cambios de pista.
+    discord: Option<crate::discord::PresenceSender>,
     /// Última pista publicada (para no repetir metadata/notificación).
     last_track: Option<(ProviderKind, String)>,
     last_paused: bool,
@@ -79,12 +81,15 @@ impl SystemIntegration {
         } else {
             None
         };
+        let (discord, discord_warning) =
+            crate::discord::spawn(config.discord, &config.discord_client_id);
         Self {
             notifications: config.notifications,
             controls,
+            discord,
             last_track: None,
             last_paused: false,
-            startup_warning: warning,
+            startup_warning: warning.or(discord_warning),
         }
     }
 
@@ -93,16 +98,41 @@ impl SystemIntegration {
         config: &Integrations,
         _tx: mpsc::UnboundedSender<MediaCommand>,
     ) -> Self {
+        let (discord, discord_warning) =
+            crate::discord::spawn(config.discord, &config.discord_client_id);
         Self {
             notifications: config.notifications,
+            discord,
             last_track: None,
             last_paused: false,
-            startup_warning: None,
+            startup_warning: discord_warning,
         }
     }
 
     /// Publica metadata/notificación solo cuando cambia la pista o la pausa.
-    pub fn update(&mut self, app: &App) {
+    /// La notificación lleva la carátula cuando ya está en disco; si aún se
+    /// descarga (o falla), queda pendiente y se resuelve en el próximo
+    /// update, cuando la carátula está lista o el fetch terminó en error.
+    pub fn update(&mut self, app: &mut App) {
+        // Resolución de la notificación pendiente: el fetch de carátula
+        // terminó (bien o mal) o la pista cambió antes de que llegara.
+        if let Some(pending) = app.notify_pending.clone() {
+            let current = app
+                .queue
+                .current_track()
+                .map(|t| (t.provider, t.id.clone()));
+            let ready = app.cover_ready_for.as_ref() == Some(&pending);
+            let failed = app.cover_failed_for.as_ref() == Some(&pending);
+            if ready || failed || current.as_ref() != Some(&pending) {
+                app.notify_pending = None;
+                if current == Some(pending) && self.notifications
+                    && let Some(track) = app.queue.current_track().cloned()
+                {
+                    notify(&track, ready.then(|| app.cover_png_path.clone()));
+                }
+            }
+        }
+
         let track = app.queue.current_track();
         let key = track.map(|t| (t.provider, t.id.clone()));
         let paused = app.status.paused;
@@ -112,6 +142,41 @@ impl SystemIntegration {
         let track_changed = key != self.last_track;
         self.last_track = key;
         self.last_paused = paused;
+
+        // Presencia en Discord: se publica con cada cambio de pista/pausa.
+        // El inicio (temporizador del perfil) sale de `app.playing`, que
+        // lleva la pista junto a su SystemTime de arranque.
+        if let Some(sender) = &self.discord {
+            let presence = match track {
+                Some(track) if paused => crate::discord::Presence::Paused {
+                    title: track.title.clone(),
+                    artist: track.artist.clone(),
+                },
+                Some(track) => {
+                    let start_unix = app
+                        .playing
+                        .as_ref()
+                        .and_then(|(_, started)| {
+                            started
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .ok()
+                                .map(|d| d.as_secs())
+                        })
+                        .unwrap_or_else(|| {
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |d| d.as_secs())
+                        });
+                    crate::discord::Presence::Playing {
+                        title: track.title.clone(),
+                        artist: track.artist.clone(),
+                        start_unix,
+                    }
+                }
+                None => crate::discord::Presence::Stopped,
+            };
+            sender.send(presence);
+        }
 
         #[cfg(target_os = "linux")]
         if let Some(controls) = &mut self.controls {
@@ -140,7 +205,20 @@ impl SystemIntegration {
         if track_changed && self.notifications
             && let Some(track) = track
         {
-            notify(track);
+            let cover_key = (track.provider, track.id.clone());
+            if app.cover_ready_for.as_ref() == Some(&cover_key) {
+                // Carátula ya en disco: notificación con imagen ya mismo.
+                notify(track, Some(app.cover_png_path.clone()));
+            } else if track.provider == ProviderKind::Youtube
+                && app.cover_failed_for.as_ref() != Some(&cover_key)
+            {
+                // Se está descargando (o aún no se pidió): se resuelve en el
+                // próximo update cuando CoverDone fije el resultado.
+                app.notify_pending = Some(cover_key);
+            } else {
+                // Sin carátula posible (no YouTube o fetch ya fallado): texto.
+                notify(track, None);
+            }
         }
     }
 }
@@ -175,13 +253,19 @@ fn map_event(event: MediaControlEvent) -> Option<MediaCommand> {
     }
 }
 
-fn notify(track: &Track) {
-    // El fallo de una notificación no debe ensuciar la UI: se ignora.
-    let _ = notify_rust::Notification::new()
+fn notify(track: &Track, image: Option<std::path::PathBuf>) {
+    // El fallo de una notificación no debe ensuciar la UI: se ignora. La
+    // imagen (carátula) solo la soportan bien los demonios de Linux;
+    // en macOS/Windows el hint se ignora y sale texto, como antes.
+    let mut notification = notify_rust::Notification::new();
+    notification
         .appname("ShellMusic")
         .summary(&track.title)
-        .body(&track.artist)
-        .show();
+        .body(&track.artist);
+    if let Some(path) = image {
+        notification.hint(notify_rust::Hint::ImagePath(path.to_string_lossy().into_owned()));
+    }
+    let _ = notification.show();
 }
 
 #[cfg(test)]
@@ -221,23 +305,25 @@ mod tests {
             &Integrations {
                 notifications: false,
                 media_controls: false,
+                discord: false,
+                discord_client_id: String::new(),
             },
             tx,
         );
         let mut app = app_with_track(false);
-        system.update(&app);
+        system.update(&mut app);
         assert_eq!(system.last_track, Some((ProviderKind::Youtube, "a".to_string())));
         assert!(!system.last_paused);
 
         // Sin cambios: no debe hacer nada (last_* ya estaban así).
-        system.update(&app);
+        system.update(&mut app);
         // Cambio de pausa: se refleja.
         app.status.paused = true;
-        system.update(&app);
+        system.update(&mut app);
         assert!(system.last_paused);
         // Pista quitada: vuelve a None.
         app.queue.current = None;
-        system.update(&app);
+        system.update(&mut app);
         assert_eq!(system.last_track, None);
     }
 }

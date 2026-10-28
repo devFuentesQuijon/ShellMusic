@@ -19,7 +19,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube. **Búsqueda en vivo** dentro de cada una con `/`.
 - **Estadísticas de escucha** (`t`) con top de pistas, artistas e **historial cronológico**; **letras** (`L`, vía lrclib.net), panel **«sonando ahora»** con carátula (`i`) y autocompletado de búsqueda desde tu historial.
 - **Portabilidad** (`X`/`I`): exporta e importa playlists y favoritos (JSON/M3U).
-- **Integración con el sistema**: notificaciones de escritorio y, en Linux, MPRIS (teclas multimedia, widgets, KDE Connect).
+- **Integración con el sistema**: notificaciones de escritorio **con carátula**, MPRIS en Linux (teclas multimedia, widgets, KDE Connect), **presencia en Discord** y **scrobbling Last.fm** (`smusic --lastfm-auth`).
 - **Temas de color** configurables y **título de pestaña** con la pista en reproducción.
 - **Robusta**: defensas anti-bot de YouTube en cadena (rotación de clientes, cookies, PO Token), auto-respawn de mpv y reintentos ante fallos transitorios.
 - **Interfaz a tu manera**: **ratón** (click en la barra = seek, rueda = volumen), **paleta de comandos** con `:` (`vol 80`, `theme dracula`…) y atajos descubribles con `?`.

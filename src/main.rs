@@ -23,6 +23,9 @@ async fn main() -> Result<()> {
             std::process::exit(2);
         }
     };
+    if cli.lastfm_auth {
+        return lastfm_auth().await;
+    }
     if !std::io::stdout().is_terminal() {
         eprintln!(
             "ShellMusic necesita un terminal interactivo (TTY) para su interfaz.\n\
@@ -115,17 +118,19 @@ async fn main() -> Result<()> {
     result
 }
 
-const USAGE: &str = "Uso: smusic [-t <nombre>] [-p <búsqueda>]
+const USAGE: &str = "Uso: smusic [-t <nombre>] [-p <búsqueda>] [--lastfm-auth]
 
 Opciones:
   -t, --theme <nombre>   usa un tema empaquetado en lugar del de config.toml
   -p, --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
+  --lastfm-auth          autoriza Last.fm interactivamente y guarda la sesión
   -h, --help             muestra esta ayuda";
 
 #[derive(Debug)]
 struct Cli {
     theme: Option<String>,
     play: Option<String>,
+    lastfm_auth: bool,
     help: bool,
 }
 
@@ -137,6 +142,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
     let mut cli = Cli {
         theme: None,
         play: None,
+        lastfm_auth: false,
         help: false,
     };
     let mut args = args.peekable();
@@ -154,6 +160,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
                         .ok_or_else(|| "-p/--play necesita un texto de búsqueda".to_string())?,
                 );
             }
+            "--lastfm-auth" => cli.lastfm_auth = true,
             "-h" | "--help" => cli.help = true,
             other => return Err(format!("argumento desconocido: {other}")),
         }
@@ -163,6 +170,28 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
         std::process::exit(0);
     }
     Ok(cli)
+}
+
+/// Alta interactiva en Last.fm: pide la sesión y la guarda en el
+/// directorio de datos para que el scrobbling la encuentre al arrancar.
+async fn lastfm_auth() -> Result<()> {
+    if !std::io::stdout().is_terminal() {
+        eprintln!("smusic --lastfm-auth necesita un terminal interactivo.");
+        std::process::exit(1);
+    }
+    let config = Config::load()?;
+    let session = shellmusic::lastfm::auth_interactive(&config.lastfm.api_key, &config.lastfm.secret)
+        .await?;
+    let data_dir = dirs::data_dir()
+        .ok_or_else(|| anyhow::anyhow!("no se pudo determinar el directorio de datos"))?
+        .join("shellmusic");
+    std::fs::create_dir_all(&data_dir)?;
+    session.save(&data_dir)?;
+    println!(
+        "Sesión de Last.fm guardada para «{}». Activa el scrobbling con [lastfm] enabled = true en config.toml.",
+        session.username
+    );
+    Ok(())
 }
 
 fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>)> {
@@ -297,5 +326,16 @@ mod tests {
             let err = parse_args_from(args(&[flag])).unwrap_err();
             assert!(err.contains("necesita"), "error para {flag}: {err}");
         }
+    }
+
+    #[test]
+    fn lastfm_auth_flag() {
+        let cli = parse_args_from(args(&["--lastfm-auth"])).unwrap();
+        assert!(cli.lastfm_auth);
+        assert!(!cli.help);
+        // Combinable con los demás flags.
+        let cli = parse_args_from(args(&["-t", "dracula", "--lastfm-auth"])).unwrap();
+        assert!(cli.lastfm_auth);
+        assert_eq!(cli.theme.as_deref(), Some("dracula"));
     }
 }

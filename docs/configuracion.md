@@ -35,8 +35,15 @@ muted = "darkgray"     # línea de hints y texto secundario
 progress = "green"     # barra de progreso
 
 [integrations]
-notifications = true    # notificación de escritorio al cambiar de pista
+notifications = true    # notificación de escritorio al cambiar de pista (con carátula en Linux)
 media_controls = true   # MPRIS en Linux; ver «Integración con el sistema»
+discord = false         # presencia en Discord («escuchando: …»); requiere el cliente Discord abierto
+discord_client_id = ""  # override para forks; vacío = el ID embebido en el binario
+
+[lastfm]
+enabled = false         # scrobbling de escucha a Last.fm
+api_key = ""             # créalas en https://www.last.fm/api/account/create
+secret = ""              # y autoriza con: smusic --lastfm-auth
 ```
 
 - Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
@@ -47,6 +54,7 @@ media_controls = true   # MPRIS en Linux; ver «Integración con el sistema»
 - Los colores aceptan nombres (`cyan`, `lightred`, `darkgray`…), hex (`#rrggbb`) e índices de paleta (0-255); un valor inválido usa el color por defecto y avisa en la línea de estado.
 - Hay una [colección de temas listos para copiar](temas.md) (incluida una temática de monstruos clásicos para Halloween).
 - El detalle de `[youtube]` (anti-bot) está en [Bloqueo anti-bot de YouTube](anti-bot.md).
+- `[integrations] discord = true` activa la presencia en Discord con el cliente abierto; los usuarios no necesitan crear nada (el Application ID va embebido en el binario). El scrobbling Last.fm (`[lastfm]`) se da de alta con `smusic --lastfm-auth`; detalle y reglas en [Integración con el sistema](integracion-sistema.md).
 
 ## Temas
 

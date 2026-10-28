@@ -17,6 +17,7 @@ desktop.ini
 
 # Entorno
 .env
+.discord-app
 
 # Herramientas de análisis y skills de agente (locales, no se distribuyen)
 .deepsec/

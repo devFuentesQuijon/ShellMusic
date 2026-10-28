@@ -471,12 +471,7 @@ fn playback_key(
         KeyCode::Char('/') => app.focus = Focus::Searching,
         KeyCode::Char(' ') => spawn_player(player, tx, |p| async move { p.toggle_pause().await }),
         KeyCode::Char('s') => {
-            app.queue.current = None;
-            app.radio_epoch += 1;
-            app.playback_active = false;
-            app.mpv_appended = None;
-            app.message = Some(Message::info("detenido"));
-            spawn_player(player, tx, |p| async move { p.stop().await });
+            super::playback::stop_playback(app, player, tx);
         }
         KeyCode::Char('+') | KeyCode::Char('=') => change_volume(app, player, tx, VOLUME_STEP),
         KeyCode::Char('-') => change_volume(app, player, tx, -VOLUME_STEP),

@@ -41,13 +41,20 @@ pub(super) enum AppMsg {
     PlaybackStarted,
     RadioDone(String, Result<Vec<Track>, String>, u64),
     LyricsDone(Result<String, String>),
-    CoverDone(Result<CoverImage, String>),
+    CoverDone(Result<CoverImage, CoverError>),
 }
 
 /// Carátula descargada y decodificada, lista para convertir en protocolo.
 pub struct CoverImage {
     pub track: (ProviderKind, String),
     pub image: image::DynamicImage,
+}
+
+/// Fallo de descarga de carátula. La clave de pista permite resolver la
+/// notificación pendiente (mandarla sin imagen) en la fase 21.
+pub struct CoverError {
+    pub message: String,
+    pub track: (ProviderKind, String),
 }
 
 /// Opciones de arranque procedentes de la línea de comandos.
@@ -149,10 +156,19 @@ pub async fn run(
                 periodic_save(&mut app);
                 if !player_respawning
                     && let Ok(status) = player.status().await
-                    && status != app.status
                 {
-                    app.status = status;
-                    needs_redraw = true;
+                    // Puntos máximos de escucha para el scrobble de
+                    // Last.fm: solo cuando suena (la pausa no cuenta).
+                    if !status.paused
+                        && let Some(pos) = status.position
+                        && pos > app.playing_peak
+                    {
+                        app.playing_peak = pos;
+                    }
+                    if status != app.status {
+                        app.status = status;
+                        needs_redraw = true;
+                    }
                 }
             }
             Some(msg) = rx.recv() => {
@@ -214,11 +230,13 @@ pub async fn run(
             needs_redraw = false;
         }
         set_tab_title(&desired_title(&app), &mut last_title);
-        system.update(&app);
+        system.update(&mut app);
         if app.should_quit {
             break;
         }
     }
+    // Scrobble de la última pista antes de guardar la sesión.
+    playback::scrobble_leaving(&mut app, &tx);
     app.save_session(app.status.position);
     set_tab_title("", &mut last_title);
     Ok(())
@@ -283,12 +301,7 @@ fn handle_media_command(
             spawn_player(player, tx, |p| async move { p.toggle_pause().await });
         }
         MediaCommand::Stop => {
-            app.queue.current = None;
-            app.radio_epoch += 1;
-            app.playback_active = false;
-            app.mpv_appended = None;
-            app.message = Some(Message::info("detenido"));
-            spawn_player(player, tx, |p| async move { p.stop().await });
+            playback::stop_playback(app, player, tx);
         }
         MediaCommand::Next => {
             play_adjacent(app, player, tx, Queue::next_index, "fin de la cola");
