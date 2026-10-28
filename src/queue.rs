@@ -53,6 +53,28 @@ impl Queue {
         self.tracks.len() - 1
     }
 
+    /// Inserta la pista justo detrás de la actual («a continuación»).
+    /// Si ya estaba en la cola, la mueve a esa posición. Sin actual,
+    /// equivale a `add`. Devuelve el índice final de la pista.
+    pub fn insert_next(&mut self, track: Track) -> usize {
+        let Some(current) = self.current else {
+            return self.add(track);
+        };
+        if let Some(index) = self.contains(&track) {
+            if index == current + 1 {
+                return index;
+            }
+            let track = self.tracks.remove(index);
+            // Quitar por delante de la actual desplaza su índice.
+            let current = if index < current { current - 1 } else { current };
+            self.current = Some(current);
+            self.tracks.insert(current + 1, track);
+            return current + 1;
+        }
+        self.tracks.insert(current + 1, track);
+        current + 1
+    }
+
     pub fn remove(&mut self, index: usize) -> Option<Removed> {
         if index >= self.tracks.len() {
             return None;
@@ -192,6 +214,57 @@ mod tests {
         assert_eq!(queue.add(track("d")), 3);
         assert_eq!(queue.add(track("b")), 1);
         assert_eq!(queue.len(), 4);
+    }
+
+    #[test]
+    fn insert_next_places_right_after_current() {
+        let mut queue = queue3();
+        queue.current = Some(0); // suena "a"
+        assert_eq!(queue.insert_next(track("d")), 1);
+        let ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "d", "b", "c"]);
+        assert_eq!(queue.current, Some(0));
+    }
+
+    #[test]
+    fn insert_next_without_current_appends() {
+        let mut queue = queue3();
+        assert_eq!(queue.insert_next(track("d")), 3);
+        assert_eq!(queue.tracks[3].id, "d");
+        assert_eq!(queue.current, None);
+    }
+
+    #[test]
+    fn insert_next_moves_existing_track() {
+        // [a,b,c,d] suena "c" (idx 2): mover "a" a continuación → [b,c,a,d]
+        let mut queue = queue3();
+        queue.add(track("d"));
+        queue.current = Some(2);
+        assert_eq!(queue.insert_next(track("a")), 2);
+        let ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["b", "c", "a", "d"]);
+        assert_eq!(queue.current, Some(1), "quitar por delante desplaza la actual");
+        assert_eq!(queue.current_track().unwrap().id, "c");
+    }
+
+    #[test]
+    fn insert_next_existing_already_next_is_noop() {
+        let mut queue = queue3();
+        queue.current = Some(0);
+        assert_eq!(queue.insert_next(track("b")), 1);
+        let ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn insert_next_existing_after_current_shifts_nothing() {
+        // [a,b,c] suena "a": mover "c" a continuación → [a,c,b]
+        let mut queue = queue3();
+        queue.current = Some(0);
+        assert_eq!(queue.insert_next(track("c")), 1);
+        let ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "c", "b"]);
+        assert_eq!(queue.current, Some(0));
     }
 
     #[test]

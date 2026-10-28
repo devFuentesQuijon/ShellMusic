@@ -12,6 +12,39 @@ use crate::providers::{ProviderKind, Track, track_key};
 
 const VERSION: u32 = 1;
 
+/// Formatea epoch (UTC) como `{YYYY-MM-DD HH:MM}` para la vista de
+/// historial. Algoritmo civil-from-days (Gregoriano proleptico); las stats
+/// no guardan zona horaria, así que la hora es UTC y se documenta como tal.
+pub(crate) fn format_timestamp(ts: u64) -> String {
+    let days = (ts / 86_400) as i64;
+    let secs = ts % 86_400;
+    // civil-from-days (Hinnant): días desde epoch -> (y, m, d) gregorianos.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    // Año relativo al era ([0, 399]); doy se calcula solo con él.
+    let y_era = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * y_era + y_era / 4 - y_era / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = y_era + era as u64 * 400 + u64::from(m <= 2);
+    let hour = secs / 3_600;
+    let minute = secs % 3_600 / 60;
+    format!("{year:04}-{m:02}-{d:02} {hour:02}:{minute:02}")
+}
+
+/// Fecha de hoy (UTC) como `YYYY-MM-DD`, para nombres de playlist sugeridos.
+pub(crate) fn today_string() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    format_timestamp(now)
+        .get(..10)
+        .unwrap_or("1970-01-01")
+        .to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsEntry {
     pub provider: ProviderKind,
@@ -29,7 +62,7 @@ pub struct StatsEntry {
 }
 
 impl StatsEntry {
-    fn to_track(&self) -> Track {
+    pub(crate) fn to_track(&self) -> Track {
         Track {
             id: self.id.clone(),
             title: self.title.clone(),
@@ -212,6 +245,18 @@ impl Stats {
         sorted.into_iter().map(|e| (e, e.to_track())).collect()
     }
 
+    /// Entradas con al menos una reproducción, de la más reciente a la más
+    /// antigua (vista de historial cronológico).
+    pub fn history(&self) -> Vec<&StatsEntry> {
+        let mut entries: Vec<&StatsEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.last_played > 0)
+            .collect();
+        entries.sort_by_key(|e| std::cmp::Reverse(e.last_played));
+        entries
+    }
+
     /// Artistas ordenados por reproducciones acumuladas. Los nombres se
     /// agrupan por forma canónica («Daft Punk - Topic» = «Daft Punk») y se
     /// muestra la forma original más frecuente.
@@ -283,6 +328,43 @@ mod tests {
         let a = stats.entries.iter().find(|e| e.id == "a").unwrap();
         assert_eq!(a.plays, 2);
         assert_eq!(stats.total_plays(), 3);
+    }
+
+    #[test]
+    fn format_timestamp_known_dates() {
+        assert_eq!(format_timestamp(0), "1970-01-01 00:00");
+        assert_eq!(format_timestamp(1_735_689_600), "2025-01-01 00:00");
+        assert_eq!(format_timestamp(1_793_145_600), "2026-10-28 00:00");
+        // 2026-10-28 12:34:56 UTC
+        assert_eq!(format_timestamp(1_793_145_600 + 45_296), "2026-10-28 12:34");
+        // Año bisiesto: 2024-02-29 00:00 UTC
+        assert_eq!(format_timestamp(1_709_164_800), "2024-02-29 00:00");
+    }
+
+    #[test]
+    fn history_is_chronological_and_skips_never_played() {
+        let mut stats = Stats::default();
+        stats.record(&track("vieja", "x"));
+        stats.record(&track("nueva", "y"));
+        // Las marcas son manuales: record() marca el segundo actual y dos
+        // llamadas seguidas pueden caer en el mismo.
+        stats.entries.iter_mut().find(|e| e.id == "vieja").unwrap().last_played = 1_000;
+        stats.entries.iter_mut().find(|e| e.id == "nueva").unwrap().last_played = 2_000;
+        // Entrada sin reproducciones (solo posible vía archivo manipulado):
+        stats.entries.push(StatsEntry {
+            provider: ProviderKind::Youtube,
+            id: "fantasma".to_string(),
+            title: "fantasma".to_string(),
+            artist: "z".to_string(),
+            duration_secs: None,
+            source_url: String::new(),
+            plays: 0,
+            last_played: 0,
+        });
+        let history = stats.history();
+        assert_eq!(history.len(), 2);
+        assert!(history[0].last_played >= history[1].last_played);
+        assert_eq!(history[0].id, "nueva");
     }
 
     #[test]

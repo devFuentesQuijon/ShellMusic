@@ -197,12 +197,35 @@ pub enum PathAction {
     Import,
 }
 
+/// Vista del overlay de estadísticas (se cicla con Tab).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatsView {
+    /// Top de pistas por reproducciones.
+    Top,
+    /// Artistas por reproducciones acumuladas.
+    Artists,
+    /// Historial cronológico (última reproducción, más reciente primero).
+    History,
+}
+
+impl StatsView {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Top => Self::Artists,
+            Self::Artists => Self::History,
+            Self::History => Self::Top,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum NameContext {
     /// Creación desde la lista de playlists.
     Plain,
     /// Creación desde el selector de "añadir a playlist": la pista se añade al crear.
     WithTrack(Box<Track>),
+    /// Guardar la cola actual como playlist nueva (foco Cola, tecla w).
+    SaveQueue,
 }
 
 pub struct App {
@@ -245,6 +268,12 @@ pub struct App {
     /// true mientras hay reproducción en curso; RadioDone solo auto-reproduce
     /// si el reproductor está parado (cola agotada), no en prefetch.
     pub playback_active: bool,
+    /// `[audio] gapless`: se apila la siguiente pista de la cola en mpv.
+    pub gapless: bool,
+    /// Clave (provider, id) de la pista apilada en la playlist interna de mpv
+    /// (gapless). Se verifica al llegar TrackEnded; cualquier carga con
+    /// `replace` (salto del usuario, stop, restore…) lo deja a None.
+    pub mpv_appended: Option<(ProviderKind, String)>,
     /// Invalida resultados de búsqueda rezagados: cada submit_search lo
     /// incrementa y captura el suyo; SearchDone solo aplica si coincide.
     pub search_epoch: u64,
@@ -266,8 +295,8 @@ pub struct App {
     history_path: std::path::PathBuf,
     pub stats: Stats,
     stats_path: std::path::PathBuf,
-    /// Vista del overlay de estadísticas: false = pistas, true = artistas.
-    pub stats_by_artist: bool,
+    /// Vista del overlay de estadísticas (cicla con Tab).
+    pub stats_view: StatsView,
     /// Selección dentro del overlay de estadísticas.
     pub stats_state: ListState,
     /// Cache de la vista pistas ordenada (índice → pista) para Enter/a.
@@ -363,6 +392,8 @@ impl App {
             search_epoch: 0,
             radio_expanded_for: None,
             playback_active: false,
+            gapless: config.audio.gapless,
+            mpv_appended: None,
             results_limit: config.general.results_per_search,
             favorites_path,
             playlists_path,
@@ -375,7 +406,7 @@ impl App {
             history_path,
             stats,
             stats_path,
-            stats_by_artist: false,
+            stats_view: StatsView::Top,
             stats_state: ListState::default(),
             stats_top: Vec::new(),
             lyrics_text: None,
@@ -627,10 +658,10 @@ impl App {
     }
 
     pub fn stats_select(&mut self, index: usize) {
-        let len = if self.stats_by_artist {
-            self.stats.top_artists().len()
-        } else {
-            self.stats_top.len()
+        let len = match self.stats_view {
+            StatsView::Artists => self.stats.top_artists().len(),
+            StatsView::Top => self.stats_top.len(),
+            StatsView::History => self.stats.history().len(),
         };
         if len > 0 {
             self.stats_state.select(Some(index.min(len - 1)));

@@ -49,6 +49,12 @@ pub enum PlayerEvent {
 pub trait Player: Send + Sync {
     /// Reproduce una URL; `start` reanuda desde esa posición (None = inicio).
     async fn play(&self, url: &str, start: Option<Duration>) -> Result<()>;
+    /// Apila una URL en la playlist interna sin reproducirla (gapless).
+    /// El valor por defecto no-op mantiene compilados los reproductores de
+    /// prueba que no implementan gapless.
+    async fn append(&self, _url: &str) -> Result<()> {
+        Ok(())
+    }
     async fn toggle_pause(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
     /// Salto relativo dentro de la pista (segundos, puede ser negativo).

@@ -15,6 +15,7 @@ default_provider = \"youtube\"              # proveedor activo al arrancar (debe
 [audio]
 initial_volume = 70       # 0-100
 format = \"\"               # selector de formato que recibe yt-dlp (mpv --ytdl-format): \"bestaudio\", \"worst\", \"bestaudio[abr<=128]\", ...; \"\" = criterio por defecto de yt-dlp
+gapless = false           # true: mpv apila la siguiente pista de la cola y la enchufa sin pausa (--gapless-audio); extrae la URL de la siguiente por adelantado
 
 [youtube]
 cookies_from_browser = \"auto\"   # \"auto\": primero sin cookies y, si YouTube bloquea, reintenta con cada navegador instalado; \"firefox\"/\"chrome\"/...: solo ese; \"\": nunca usar cookies
@@ -69,6 +70,10 @@ pub struct Audio {
     /// Selector de formato de extracción de yt-dlp (mpv `--ytdl-format`);
     /// vacío = criterio por defecto de yt-dlp.
     pub format: String,
+    /// Gapless: mpv apila la siguiente pista de la cola mientras suena la
+    /// actual y la enchufa sin pausa al terminar (`--gapless-audio`).
+    /// A cambio, extrae la URL de la siguiente pista por adelantado.
+    pub gapless: bool,
 }
 
 impl Default for General {
@@ -90,6 +95,7 @@ impl Default for Audio {
         Self {
             initial_volume: 70,
             format: String::new(),
+            gapless: false,
         }
     }
 }

@@ -331,6 +331,51 @@ def run_suite(binary):
     # ── 8. La app queda viva tras los errores anteriores ────────────────
     check("la app sigue viva tras errores de búsqueda", "Buscar en" in ui.text())
 
+    # ── 8b. Fase 20: play-next, cola→playlist e historial ───────────────
+    # Enter reproduce la pista seleccionada del álbum de Bandcamp: entra en
+    # la cola (había 3 pistas de daft punk) en la posición 4.
+    ui.send("\r")
+    playing20 = ui.wait_for(r"▶ .*cola 4/4", 45)
+    check("fase 20: reproducción del álbum", playing20)
+    ui.send("\x1b[B")  # selección a la segunda pista del álbum
+    ui.pump(0.3)
+    ui.send("e")       # encolar a continuación
+    ui.pump(0.8)
+    check("e encola a continuación", "a continuación:" in ui.text())
+    # La pista se inserta en current+1: el panel muestra «Cola (4/5)».
+    check("pista insertada tras la actual", "Cola (4/5)" in ui.text())
+
+    # w: guardar la cola como playlist (acepta el nombre sugerido).
+    ui.send("\t")      # foco Cola
+    ui.pump(0.3)
+    ui.send("w")
+    ui.pump(0.5)
+    check("w pide nombre para la cola",
+          "Guardar cola (5 pistas) como playlist" in ui.text())
+    ui.send("\r")
+    ui.pump(0.8)
+    check("cola guardada como playlist", "cola guardada como playlist" in ui.text())
+    ui.send("P")
+    ui.pump(0.6)
+    check("playlist nueva visible en el gestor",
+          re.search(r"cola \d{4}-\d{2}-\d{2} \(5\)", ui.text()) is not None)
+    ui.send("\x1b")    # cerrar gestor
+    ui.pump(0.3)
+
+    # t: el overlay de estadísticas cicla a la vista historial con fecha.
+    ui.send("t")
+    ui.pump(0.5)
+    ui.send("\t")      # artistas
+    ui.pump(0.3)
+    ui.send("\t")      # historial
+    ui.pump(0.5)
+    hist = ui.text()
+    check("vista historial de estadísticas",
+          "Tus más escuchadas (historial)" in hist
+          and re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", hist) is not None)
+    ui.send("\x1b")
+    ui.pump(0.3)
+
     # ── Salir ───────────────────────────────────────────────────────────
     ui.send("q")
     ui.pump(1.0)
@@ -383,6 +428,46 @@ def run_cli_flags(binary):
           f"(exit {child.exitstatus})")
 
 
+def run_fase20_gapless(binary):
+    """Gapless: arranque y ciclo de reproducción con [audio] gapless = true."""
+    env = make_env()
+    cfg_dir = os.path.join(env["XDG_CONFIG_HOME"], "shellmusic")
+    os.makedirs(cfg_dir, exist_ok=True)
+    # El config mínimo: la app crea el resto con valores por defecto.
+    with open(os.path.join(cfg_dir, "config.toml"), "w") as f:
+        f.write("[audio]\ngapless = true\n")
+
+    ui = Ui(env, binary)
+    found = ui.wait_for(r"Buscar en YouTube \(Enter: buscar", 15)
+    check("gapless: arranque con gapless=true", found)
+    ui.send("daft punk")
+    ui.pump(0.3)
+    ui.send("\r")
+    got = ui.wait_for(r"Resultados \(\d\d+\)", 30)
+    check("gapless: búsqueda funciona", got)
+    if got:
+        # Encolar dos y reproducir la primera: al arrancar, gapless apila la
+        # segunda con loadfile append (ruta real del flag).
+        ui.send("a")
+        ui.pump(0.3)
+        ui.send("\x1b[B")
+        ui.pump(0.3)
+        ui.send("a")
+        ui.pump(0.5)
+        ui.send("g")
+        ui.pump(0.3)
+        ui.send("\r")
+        playing = ui.wait_for(r"▶ .*cola 1/2", 45)
+        check("gapless: reproducción con siguiente apilada", playing)
+        if playing:
+            ui.pump(1.0)
+            check("gapless: append sin error visible",
+                  "no se pudo apilar" not in ui.text())
+    ui.send("q")
+    ui.pump(0.5)
+    ui.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--binary", default=str(REPO_ROOT / "target/release/smusic"),
@@ -399,6 +484,7 @@ def main():
     print(f"Binario: {binary}")
     run_suite(binary)
     run_cli_flags(binary)
+    run_fase20_gapless(binary)
     if args.dumb_startup:
         run_dumb_startup(binary)
 

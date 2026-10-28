@@ -208,14 +208,16 @@ impl MpvPlayer {
         initial_volume: u8,
         youtube: &Youtube,
         audio_format: &str,
+        gapless: bool,
     ) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
-        Self::spawn_with_args(initial_volume, youtube, audio_format, &[]).await
+        Self::spawn_with_args(initial_volume, youtube, audio_format, gapless, &[]).await
     }
 
     pub async fn spawn_with_args(
         initial_volume: u8,
         youtube: &Youtube,
         audio_format: &str,
+        gapless: bool,
         extra_args: &[&str],
     ) -> Result<(Self, mpsc::UnboundedReceiver<PlayerEvent>)> {
         let socket_path = ipc_server_path();
@@ -245,6 +247,11 @@ impl MpvPlayer {
             .stderr(Stdio::piped());
         if !audio_format.is_empty() {
             command.arg(format!("--ytdl-format={audio_format}"));
+        }
+        // Gapless: solo tiene efecto si la siguiente pista ya está en la
+        // playlist interna de mpv (la app la apila con `loadfile append`).
+        if gapless {
+            command.arg("--gapless-audio=yes");
         }
         let mut child = command.spawn().context("no se pudo lanzar mpv")?;
         let stderr = child.stderr.take();
@@ -434,6 +441,14 @@ impl MpvPlayer {
 
 #[async_trait]
 impl Player for MpvPlayer {
+    async fn append(&self, url: &str) -> Result<()> {
+        // "append" encola en la playlist interna sin interrumpir la actual;
+        // al terminar (eof) mpv pasa a ella sin pausa con --gapless-audio.
+        self.command(vec!["loadfile".into(), url.into(), "append".into()])
+            .await?;
+        Ok(())
+    }
+
     async fn play(&self, url: &str, start: Option<Duration>) -> Result<()> {
         // Si la combinación cacheada deja de funcionar (YouTube rota sus
         // defensas), se descarta y se recorre el plan completo.

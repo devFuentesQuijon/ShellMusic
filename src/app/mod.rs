@@ -18,7 +18,7 @@ mod input;
 mod playback;
 mod state;
 
-pub use state::{App, Focus, Message, NameContext, Overlay, PathAction, RadioMode, RepeatMode};
+pub use state::{App, Focus, Message, NameContext, Overlay, PathAction, RadioMode, RepeatMode, StatsView};
 
 use input::handle_key;
 use playback::{autoplay_next, handle_msg, play_queue_track_from};
@@ -89,6 +89,7 @@ pub async fn run(
     // el volumen vigente. Guarda anti-bucle: máx. 3 respawns en 60 s.
     let youtube = config.youtube.clone();
     let audio_format = config.audio.format.clone();
+    let gapless = config.audio.gapless;
     let mut player = player;
     let mut respawn_times: Vec<std::time::Instant> = Vec::new();
     let mut respawn_rx: Option<RespawnRx> = None;
@@ -168,7 +169,7 @@ pub async fn run(
                                 respawn_times.push(std::time::Instant::now());
                                 player_respawning = true;
                                 app.message = Some(Message::info("mpv se cerró; reiniciándolo…"));
-                                respawn_player(&mut respawn_rx, &youtube, &audio_format, app.status.volume);
+                                respawn_player(&mut respawn_rx, &youtube, &audio_format, gapless, app.status.volume);
                             }
                         }
                     }
@@ -185,6 +186,9 @@ pub async fn run(
                     Ok((new_player, new_events)) => {
                         player = new_player;
                         player_events = new_events;
+                        // El mpv nuevo tiene la playlist interna vacía: la
+                        // pista apilada para gapless ya no existe.
+                        app.mpv_appended = None;
                         app.message = Some(Message::info("mpv reiniciado"));
                     }
                     Err(err) => {
@@ -214,6 +218,7 @@ fn respawn_player(
     respawn_rx: &mut Option<RespawnRx>,
     youtube: &crate::config::Youtube,
     audio_format: &str,
+    gapless: bool,
     volume: u8,
 ) {
     let youtube = youtube.clone();
@@ -221,10 +226,15 @@ fn respawn_player(
     let (done_tx, done_rx) = mpsc::unbounded_channel();
     *respawn_rx = Some(done_rx);
     tokio::spawn(async move {
-        let result = crate::player::mpv::MpvPlayer::spawn(volume, &youtube, &audio_format)
-            .await
-            .map(|(player, events)| (Arc::new(player) as Arc<dyn Player>, events))
-            .map_err(|err| err.to_string());
+        let result = crate::player::mpv::MpvPlayer::spawn(
+            volume,
+            &youtube,
+            &audio_format,
+            gapless,
+        )
+        .await
+        .map(|(player, events)| (Arc::new(player) as Arc<dyn Player>, events))
+        .map_err(|err| err.to_string());
         let _ = done_tx.send(result);
     });
 }
@@ -265,6 +275,7 @@ fn handle_media_command(
             app.queue.current = None;
             app.radio_epoch += 1;
             app.playback_active = false;
+            app.mpv_appended = None;
             app.message = Some(Message::info("detenido"));
             spawn_player(player, tx, |p| async move { p.stop().await });
         }

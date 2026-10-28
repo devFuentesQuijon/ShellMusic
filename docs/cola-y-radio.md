@@ -8,6 +8,8 @@ El panel derecho muestra la cola: posición, título, artista y duración, con `
 - Si eliminas con `d` la pista que está sonando, se reproduce la que ocupa su lugar; si era la última, se detiene.
 - La cola es persistente: se guarda en `session.json` junto a `favorites.json` al cambiar de pista y al salir, y al arrancar se restaura la cola y se reanuda la pista desde la posición en la que estaba. Además, con reproducción activa se guarda periódicamente cada ~30 s: un cierre abrupto (`kill -9`) pierde como máximo 30 segundos.
 - Con la radio activa la cola crece sin límite; al superar 500 pistas se podan las ya reproducidas conservando las 20 anteriores a la actual para poder volver con `p`.
+- `e` (Resultados / Favoritos / Cola) encola **a continuación**: inserta la pista justo detrás de la que suena, no al final; si ya estaba en la cola la mueve. En el foco Cola mueve la seleccionada a esa posición. Sin nada sonando equivale a `a`.
+- `w` (foco Cola) guarda la cola como playlist: pide nombre (sugerido «cola YYYY-MM-DD», editable) y crea la playlist con el contenido en orden.
 
 ## Repetición y orden aleatorio
 

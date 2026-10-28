@@ -9,11 +9,11 @@ use crate::queue::Queue;
 
 use super::AppMsg;
 use super::playback::{
-    add_to_queue, change_volume, open_lyrics, play_adjacent, play_queue_track, play_result,
-    radio_prefetch, remove_from_queue, request_cover, seek_by, shuffle_queue, spawn_player,
-    submit_search, toggle_favorite,
+    add_next_to_queue, add_to_queue, change_volume, open_lyrics, play_adjacent, play_queue_track,
+    play_result, radio_prefetch, remove_from_queue, request_cover, seek_by, shuffle_queue,
+    spawn_player, submit_search, toggle_favorite,
 };
-use super::state::{App, Focus, Message, NameContext, Overlay, PathAction};
+use super::state::{App, Focus, Message, NameContext, Overlay, PathAction, StatsView};
 
 const VOLUME_STEP: i16 = 5;
 const SEEK_STEP: i32 = 5;
@@ -67,6 +67,11 @@ pub(super) fn handle_key(
                     add_to_queue(app, app.results[index].clone());
                 }
             }
+            KeyCode::Char('e') => {
+                if let Some(index) = app.selected() {
+                    add_next_to_queue(app, app.results[index].clone());
+                }
+            }
             KeyCode::Char('f') => {
                 let track = app
                     .selected()
@@ -115,6 +120,21 @@ pub(super) fn handle_key(
                 }
             }
             KeyCode::Char('d') => remove_from_queue(app, player, tx),
+            KeyCode::Char('w') => {
+                if app.queue.is_empty() {
+                    app.message = Some(Message::info("la cola está vacía"));
+                } else {
+                    app.overlay_input = format!("cola {}", crate::stats::today_string());
+                    app.overlay = Overlay::NameInput(NameContext::SaveQueue);
+                }
+            }
+            KeyCode::Char('e') => {
+                if let Some(index) = app.queue_selected() {
+                    let track = app.queue.tracks[index].clone();
+                    let new_index = add_next_to_queue(app, track);
+                    app.queue_select(new_index);
+                }
+            }
             KeyCode::Char('f') => {
                 let track = app
                     .queue_selected()
@@ -184,6 +204,11 @@ pub(super) fn handle_key(
                     add_to_queue(app, app.favorites.tracks[index].clone());
                 }
             }
+            KeyCode::Char('e') => {
+                if let Some(index) = app.favorites_selected() {
+                    add_next_to_queue(app, app.favorites.tracks[index].clone());
+                }
+            }
             KeyCode::Char('d') | KeyCode::Char('f') => {
                 if let Some(index) = app.favorites_selected() {
                     if let Some(track) = app.favorites.remove(index) {
@@ -247,6 +272,7 @@ fn playback_key(
             app.queue.current = None;
             app.radio_epoch += 1;
             app.playback_active = false;
+            app.mpv_appended = None;
             app.message = Some(Message::info("detenido"));
             spawn_player(player, tx, |p| async move { p.stop().await });
         }
@@ -425,21 +451,20 @@ fn overlay_stats_key(
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
-    let len = if app.stats_by_artist {
-        app.stats.top_artists().len()
-    } else {
-        app.stats_top.len()
+    let len = match app.stats_view {
+        StatsView::Artists => app.stats.top_artists().len(),
+        StatsView::Top => app.stats_top.len(),
+        StatsView::History => app.stats.history().len(),
     };
     match key.code {
         KeyCode::Esc | KeyCode::Char('t') => app.overlay = Overlay::Closed,
         KeyCode::Tab => {
-            app.stats_by_artist = !app.stats_by_artist;
+            app.stats_view = app.stats_view.next();
             app.stats_state.select(if len > 0 { Some(0) } else { None });
         }
         KeyCode::Enter => {
-            if !app.stats_by_artist
-                && let Some(index) = app.stats_state.selected()
-                && let Some(track) = app.stats_top.get(index).cloned()
+            if !matches!(app.stats_view, StatsView::Artists)
+                && let Some(track) = stats_selected_track(app)
                 && !track.source_url.is_empty()
             {
                 app.overlay = Overlay::Closed;
@@ -449,9 +474,8 @@ fn overlay_stats_key(
             }
         }
         KeyCode::Char('a') => {
-            if !app.stats_by_artist
-                && let Some(index) = app.stats_state.selected()
-                && let Some(track) = app.stats_top.get(index).cloned()
+            if !matches!(app.stats_view, StatsView::Artists)
+                && let Some(track) = stats_selected_track(app)
                 && !track.source_url.is_empty()
             {
                 add_to_queue(app, track);
@@ -480,6 +504,22 @@ fn overlay_stats_key(
         KeyCode::Char('g') => app.stats_select(0),
         KeyCode::Char('G') => app.stats_select(usize::MAX),
         _ => {}
+    }
+}
+
+/// Pista seleccionada en el overlay de estadísticas según la vista activa:
+/// la cache del top en «pistas», la entrada convertida en «historial».
+/// En «artistas» no hay pista (la lista agrupa por artista).
+fn stats_selected_track(app: &App) -> Option<Track> {
+    let index = app.stats_state.selected()?;
+    match app.stats_view {
+        StatsView::Artists => None,
+        StatsView::Top => app.stats_top.get(index).cloned(),
+        StatsView::History => app
+            .stats
+            .history()
+            .get(index)
+            .map(|entry| entry.to_track()),
     }
 }
 
@@ -717,39 +757,74 @@ fn overlay_content_key(
     }
 }
 
+/// Crea una playlist con el contenido actual de la cola (en orden).
+fn save_queue_as_playlist(app: &mut App, name: &str) {
+    if app.queue.is_empty() {
+        app.message = Some(Message::info("la cola está vacía"));
+        app.overlay = Overlay::Closed;
+        return;
+    }
+    match app.playlists.create(name) {
+        Ok(index) => {
+            let tracks: Vec<Track> = app.queue.tracks.clone();
+            for track in tracks {
+                app.playlists.add_track(index, track);
+            }
+            app.save_playlists();
+            let created = app.playlists.items[index].name.clone();
+            let count = app.playlists.items[index].tracks.len();
+            app.message = Some(Message::info(format!(
+                "cola guardada como playlist «{created}» ({count} pistas)"
+            )));
+            app.overlay = Overlay::Closed;
+        }
+        Err(err) => app.message = Some(Message::error(err)),
+    }
+}
+
 fn overlay_name_key(app: &mut App, key: KeyEvent, context: NameContext) {
     match key.code {
         KeyCode::Esc => {
             app.overlay = match context {
                 NameContext::Plain => Overlay::List,
                 NameContext::WithTrack(track) => Overlay::Pick(*track),
+                // Viene del foco Cola, no del gestor de playlists.
+                NameContext::SaveQueue => Overlay::Closed,
             };
         }
         KeyCode::Enter => {
             let name = app.overlay_input.clone();
-            match app.playlists.create(&name) {
-                Ok(index) => {
-                    let created = app.playlists.items[index].name.clone();
-                    app.save_playlists();
-                    match context {
-                        NameContext::Plain => {
-                            app.message =
-                                Some(Message::info(format!("playlist «{created}» creada")));
-                            app.overlay = Overlay::List;
-                            app.overlay_list_select(index);
-                        }
-                        NameContext::WithTrack(track) => {
-                            app.playlists.add_track(index, *track.clone());
+            match context {
+                NameContext::SaveQueue => {
+                    save_queue_as_playlist(app, &name);
+                }
+                NameContext::Plain | NameContext::WithTrack(_) => {
+                    match app.playlists.create(&name) {
+                        Ok(index) => {
+                            let created = app.playlists.items[index].name.clone();
                             app.save_playlists();
-                            app.message = Some(Message::info(format!(
-                                "añadida a «{created}»: {}",
-                                track.title
-                            )));
-                            app.overlay = Overlay::Closed;
+                            match context {
+                                NameContext::Plain => {
+                                    app.message =
+                                        Some(Message::info(format!("playlist «{created}» creada")));
+                                    app.overlay = Overlay::List;
+                                    app.overlay_list_select(index);
+                                }
+                                NameContext::WithTrack(track) => {
+                                    app.playlists.add_track(index, *track.clone());
+                                    app.save_playlists();
+                                    app.message = Some(Message::info(format!(
+                                        "añadida a «{created}»: {}",
+                                        track.title
+                                    )));
+                                    app.overlay = Overlay::Closed;
+                                }
+                                NameContext::SaveQueue => unreachable!("caso ya manejado"),
+                            }
                         }
+                        Err(err) => app.message = Some(Message::error(err)),
                     }
                 }
-                Err(err) => app.message = Some(Message::error(err)),
             }
         }
         KeyCode::Backspace => {

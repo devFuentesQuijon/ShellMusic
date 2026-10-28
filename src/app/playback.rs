@@ -68,6 +68,7 @@ pub(super) fn handle_msg(
             if app.message.as_ref().is_some_and(|m| !m.is_error) {
                 app.message = None;
             }
+            gapless_append_next(app, player, tx);
         }
         AppMsg::RadioDone(artist, Ok(tracks), epoch) => {
             // Si el usuario detuvo, reprodujo otra cosa o desactivó la radio
@@ -133,6 +134,18 @@ pub(super) fn add_to_queue(app: &mut App, track: Track) {
     if app.queue_selected().is_none() {
         app.queue_select(0);
     }
+}
+
+/// «Encolar a continuación»: inserta la pista justo detrás de la actual.
+/// Devuelve el índice final de la pista en la cola.
+pub(super) fn add_next_to_queue(app: &mut App, track: Track) -> usize {
+    app.queue.prune_played();
+    let index = app.queue.insert_next(track.clone());
+    app.message = Some(Message::info(format!("a continuación: {}", track.title)));
+    if app.queue_selected().is_none() {
+        app.queue_select(0);
+    }
+    index
 }
 
 pub(super) fn toggle_favorite(app: &mut App, track: Option<Track>) {
@@ -225,6 +238,9 @@ pub(super) fn play_queue_track_from(
         return;
     }
     app.queue.current = Some(index);
+    // Un loadfile con replace (el modo por defecto) limpia la playlist
+    // interna de mpv: la pista apilada para gapless ya no existe.
+    app.mpv_appended = None;
     // Invalida cualquier expansión de radio en vuelo: hay reproducción nueva.
     app.radio_epoch += 1;
     app.playback_active = true;
@@ -289,14 +305,32 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
     }
     app.playback_active = false;
     if app.repeat == RepeatMode::One {
+        app.mpv_appended = None;
         play_queue_track(app, player, tx, app.queue.current.unwrap());
         return;
     }
     if let Some(index) = app.queue.next_index() {
+        // Gapless: si la pista que mpv ya está sonando es la que toca, solo
+        // se avanza el estado; la reproducción no se interrumpe. Si la cola
+        // cambió entre medias (borrado/movido/barajado), la clave no cuadra
+        // y se recarga con replace como siempre.
+        let appended_matches = app
+            .mpv_appended
+            .as_ref()
+            .zip(app.queue.tracks.get(index))
+            .is_some_and(|(key, track)| key.0 == track.provider && key.1 == track.id);
+        if app.gapless && appended_matches {
+            gapless_advance(app, index);
+            gapless_append_next(app, player, tx);
+            radio_prefetch(app, tx);
+            return;
+        }
+        app.mpv_appended = None;
         play_queue_track(app, player, tx, index);
         return;
     }
     if app.repeat == RepeatMode::All && !app.queue.is_empty() {
+        app.mpv_appended = None;
         play_queue_track(app, player, tx, 0);
         return;
     }
@@ -305,6 +339,60 @@ pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::
         // no duplica la búsqueda: RadioDone arrancará la reproducción.
         radio_prefetch(app, tx);
     }
+}
+
+/// Avance gapless: la pista `index` ya está sonando en mpv (apilada con
+/// `append` antes de que terminara la anterior). Replica el bookkeeping de
+/// `play_queue_track_from` sin tocar el reproductor.
+fn gapless_advance(app: &mut App, index: usize) {
+    app.queue.current = Some(index);
+    app.radio_epoch += 1;
+    app.playback_active = true;
+    app.played.insert((
+        app.queue.tracks[index].provider,
+        app.queue.tracks[index].id.clone(),
+    ));
+    app.played_titles.insert(normalize_title(
+        &app.queue.tracks[index].title,
+        &app.queue.tracks[index].artist,
+    ));
+    app.stats.record(&app.queue.tracks[index]);
+    app.stats_dirty = true;
+    app.queue_select(index);
+    app.save_session(None);
+}
+
+/// Gapless: apila en mpv la siguiente pista de la cola (`loadfile append`)
+/// para que al terminar la actual pase a ella sin pausa. Guarda su clave en
+/// `mpv_appended`; el avance solo se confía si al terminar la clave encaja
+/// con la pista que toca. Con repetición «one» no se apila: la siguiente
+/// «reproducción» es la misma pista y se recarga con replace.
+fn gapless_append_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>) {
+    app.mpv_appended = None;
+    if !app.gapless || app.repeat == RepeatMode::One {
+        return;
+    }
+    let Some(next) = app.queue.next_index() else {
+        return;
+    };
+    let Some(track) = app.queue.tracks.get(next) else {
+        return;
+    };
+    if track.source_url.is_empty() {
+        return;
+    }
+    let key = (track.provider, track.id.clone());
+    let url = track.source_url.clone();
+    let player = Arc::clone(player);
+    let tx = tx.clone();
+    app.mpv_appended = Some(key);
+    tokio::spawn(async move {
+        if let Err(err) = player.append(&url).await {
+            let _ = tx.send(AppMsg::Error(format!(
+                "no se pudo apilar la siguiente pista: {err}"
+            )));
+        }
+    });
 }
 
 /// ←/→: salto relativo dentro de la pista en reproducción.

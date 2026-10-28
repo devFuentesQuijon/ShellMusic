@@ -16,10 +16,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let accent = app.theme.accent;
     let muted = app.theme.muted;
 
-    let view = if app.stats_by_artist {
-        "artistas"
-    } else {
-        "pistas"
+    let view = match app.stats_view {
+        crate::app::StatsView::Top => "pistas",
+        crate::app::StatsView::Artists => "artistas",
+        crate::app::StatsView::History => "historial",
     };
     let header = format!(
         "Tus más escuchadas ({view}) — {} reproducciones · {} pistas · {} artistas",
@@ -37,20 +37,34 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     }
 
-    let items: Vec<ListItem> = if app.stats_by_artist {
-        app.stats
+    let items: Vec<ListItem> = match app.stats_view {
+        crate::app::StatsView::Artists => app
+            .stats
             .top_artists()
             .iter()
             .map(|c| ListItem::new(format!("{}× {}", c.plays, c.artist)))
-            .collect()
-    } else {
-        app.stats
+            .collect(),
+        crate::app::StatsView::Top => app
+            .stats
             .top_tracks()
             .iter()
             .map(|(entry, _)| {
                 ListItem::new(format!("{}× {} — {}", entry.plays, entry.title, entry.artist))
             })
-            .collect()
+            .collect(),
+        crate::app::StatsView::History => app
+            .stats
+            .history()
+            .iter()
+            .map(|entry| {
+                ListItem::new(format!(
+                    "{} · {} — {}",
+                    crate::stats::format_timestamp(entry.last_played),
+                    entry.title,
+                    entry.artist
+                ))
+            })
+            .collect(),
     };
     let list = List::new(items)
         .block(block_widget)

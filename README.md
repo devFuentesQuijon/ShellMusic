@@ -14,10 +14,10 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 ## Características
 
 - **Busca y reproduce** YouTube Music y SoundCloud sin abrir el navegador (`m` cambia de proveedor en caliente); también acepta URLs pegadas de vídeo, playlist o Bandcamp.
-- **Cola gestionable y persistente**: añade, quita, reordena, baraja; al cerrar y reabrir, la cola, la pista y la posición se reanudan donde lo dejaste (a prueba de `kill -9`).
+- **Cola gestionable y persistente**: añade, quita, reordena, baraja; `e` encola a continuación y `w` guarda la cola como playlist; al cerrar y reabrir, la cola, la pista y la posición se reanudan donde lo dejaste (a prueba de `kill -9`). Reproducción **gapless** opcional (`[audio] gapless = true`).
 - **Modo radio** con cinco sub-modos (artista, similares, random, random género, rarezas) y prefetch sin pausa.
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube.
-- **Estadísticas de escucha** (`t`), **letras** (`L`, vía lrclib.net), panel **«sonando ahora»** con carátula (`i`) y autocompletado de búsqueda desde tu historial.
+- **Estadísticas de escucha** (`t`) con top de pistas, artistas e **historial cronológico**; **letras** (`L`, vía lrclib.net), panel **«sonando ahora»** con carátula (`i`) y autocompletado de búsqueda desde tu historial.
 - **Portabilidad** (`X`/`I`): exporta e importa playlists y favoritos (JSON/M3U).
 - **Integración con el sistema**: notificaciones de escritorio y, en Linux, MPRIS (teclas multimedia, widgets, KDE Connect).
 - **Temas de color** configurables y **título de pestaña** con la pista en reproducción.

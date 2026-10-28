@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
             }
         }
     }
-    let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube, &config.audio.format).await {
+    let (player, player_events) = match MpvPlayer::spawn(config.audio.initial_volume, &config.youtube, &config.audio.format, config.audio.gapless).await {
         Ok(ok) => ok,
         Err(err) => {
             eprintln!("No se pudo iniciar mpv: {err:#}");

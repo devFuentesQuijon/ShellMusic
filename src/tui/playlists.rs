@@ -104,6 +104,7 @@ fn draw_name_input(frame: &mut Frame, app: &mut App, area: Rect, context: &NameC
     let title = match context {
         NameContext::Plain => "Nueva playlist".to_string(),
         NameContext::WithTrack(track) => format!("Nueva playlist para: {}", track.title),
+        NameContext::SaveQueue => format!("Guardar cola ({} pistas) como playlist", app.queue.len()),
     };
     let input = Paragraph::new(app.overlay_input.as_str()).block(block(title, app.theme.accent));
     frame.render_widget(input, area);

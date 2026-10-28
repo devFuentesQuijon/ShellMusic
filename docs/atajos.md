@@ -14,10 +14,13 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | ↑ / ↓ (o k / j) | Resultados / Cola / Favoritos | Mover selección |
 | Enter | Resultados | Reproducir selección (la añade a la cola si no está) |
 | a | Resultados | Añadir a la cola sin interrumpir la reproducción |
+| e | Resultados / Favoritos | Encolar a continuación: insertar justo detrás de la pista que suena (si ya estaba en la cola, la mueve) |
+| w | Cola | Guardar la cola como playlist (pide nombre; sugiere «cola YYYY-MM-DD») |
 | f | Resultados / Cola | Marcar / quitar favorito (o de la pista que suena si no hay selección) |
 | Enter | Cola | Reproducir la pista seleccionada |
 | d | Cola | Eliminar de la cola |
 | J / K | Cola | Mover la pista abajo / arriba |
+| e | Cola | Mover la pista seleccionada a «a continuación» (detrás de la que suena) |
 | Enter | Favoritos | Reproducir (y añadir a la cola) |
 | a | Favoritos | Añadir a la cola sin interrumpir |
 | d / f | Favoritos | Quitar de favoritos |
@@ -37,7 +40,7 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
 | m | Resultados / Cola / Favoritos | Cambiar de proveedor de búsqueda (YouTube / SoundCloud) |
-| t | Resultados / Cola / Favoritos | Estadísticas de escucha (overlay; Tab alterna pistas/artistas) |
+| t | Resultados / Cola / Favoritos | Estadísticas de escucha (overlay; Tab cicla pistas → artistas → historial) |
 | X | Resultados / Cola / Favoritos | Exportar playlists/favoritos a JSON (en una playlist: a M3U) |
 | I | Resultados / Cola / Favoritos | Importar desde `.json` o `.m3u` |
 | L | Resultados / Cola / Favoritos | Letra de la pista que suena (o la seleccionada) |
