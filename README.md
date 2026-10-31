@@ -33,6 +33,8 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 
 Descarga el binario para tu SO desde [GitHub Releases](https://github.com/devFuentesQuijon/ShellMusic/releases) (`smusic-linux-x86_64`, `smusic-macos-aarch64`, `smusic-windows-x86_64.exe`), dale permiso de ejecución (`chmod +x`) y ponlo en tu `PATH`. Cada release incluye también `smusic-mcp-<plataforma>`, el [puente MCP para agentes de IA](docs/mcp.md) (opcional; solo sirve con la app en ejecución).
 
+En **Windows** hay alternativa al binario suelto: `smusic-windows-x86_64-setup.exe`, un instalador que copia `smusic` y `smusic-mcp` a `%LOCALAPPDATA%\Programs\ShellMusic`, los añade al `PATH` del usuario y, al terminar, ofrece instalar mpv y yt-dlp con winget si faltan.
+
 ### Opción 2: compilar
 
 ```sh

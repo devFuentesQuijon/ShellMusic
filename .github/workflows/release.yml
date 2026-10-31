@@ -48,9 +48,25 @@ jobs:
           chmod +x "dist/${{ matrix.artifact }}" "dist/${{ matrix.mcp_artifact }}" || true
           ls -la dist
 
+      - name: Instalar Inno Setup
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+
+      - name: Compilar instalador (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}" -replace '^v', ''
+          if ($v -notmatch '^\d+(\.\d+){0,3}$') { $v = '0.0.0' }
+          $parts = @($v.Split('.')) + @('0', '0', '0', '0')
+          $info = ($parts[0..3]) -join '.'
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" `
+            "/DAppVersion=$v" "/DVersionInfo=$info" installer\smusic.iss
+
       - name: Publicar en GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             dist/${{ matrix.artifact }}
             dist/${{ matrix.mcp_artifact }}
+            dist/smusic-windows-x86_64-setup.exe

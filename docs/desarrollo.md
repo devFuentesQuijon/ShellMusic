@@ -26,6 +26,14 @@ python3 scripts/e2e_check.py --dumb-startup  # + terminal mudo <2s
 
 Reproduce audio real y accede a red: si YouTube responde con bloqueo anti-bot, los tests de búsqueda fallan sin que sea regresión (ver `docs/anti-bot.md`).
 
+## Instalador de Windows
+
+`installer/smusic.iss` (Inno Setup 6) genera `smusic-windows-x86_64-setup.exe`: instalación por usuario (sin admin) en `%LOCALAPPDATA%\Programs\ShellMusic`, alta del PATH del usuario (HKCU) con limpieza al desinstalar, y un paso final que instala mpv y yt-dlp con winget si faltan. El workflow de release lo compila y publica en cada tag; la versión se inyecta con defines:
+
+```sh
+iscc /DAppVersion=0.3.1 /DVersionInfo=0.3.1.0 installer\smusic.iss
+```
+
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) corre en cada push/PR a `main`:
