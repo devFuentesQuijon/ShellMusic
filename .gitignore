@@ -19,6 +19,10 @@ desktop.ini
 .env
 .discord-app
 
+# Python (scripts/)
+__pycache__/
+*.pyc
+
 # Herramientas de análisis y skills de agente (locales, no se distribuyen)
 .deepsec/
 .agents/
