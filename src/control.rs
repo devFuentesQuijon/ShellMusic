@@ -339,9 +339,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn serve_replies_each_request_line() {
+        // Nombre corto: macOS limita sun_path a 104 bytes y el temporal del
+        // runner ya lleva ~50 de prefijo.
         let dir = std::env::temp_dir().join(format!(
-            "shellmusic-control-test-{}-{:016x}",
-            std::process::id(),
+            "sm-{:016x}",
             crate::state_file::random_suffix()
         ));
         std::fs::create_dir_all(&dir).unwrap();

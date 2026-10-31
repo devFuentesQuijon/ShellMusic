@@ -185,6 +185,9 @@ mod tests {
         assert_ne!(unique_tmp_path(path), unique_tmp_path(path));
     }
 
+    /// La comprobación de PID muerto solo existe en unix; en Windows solo la
+    /// edad del lock decide (ver `process_alive`).
+    #[cfg(unix)]
     #[test]
     fn stale_lock_from_dead_process_is_replaced() {
         let dir = std::env::temp_dir().join(format!("shellmusic-lock-stale-{}", std::process::id()));

@@ -166,7 +166,9 @@ mod tests {
     }
 
     /// Script falso de yt-dlp: falla `failures` veces (contando en un
-    /// archivo) y después imprime JSON de una pista.
+    /// archivo) y después imprime JSON de una pista. Es un script de
+    /// `/bin/sh`: solo corre en unix (en Windows el spawn fallaría).
+    #[cfg(unix)]
     fn fake_ytdlp_script(dir: &std::path::Path, failures: u32) -> std::path::PathBuf {
         let script = dir.join("yt-dlp-fake");
         let counter = dir.join("fake-counter");
@@ -190,6 +192,7 @@ mod tests {
         script
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn retry_recovers_from_transient_failure() {
         let dir = std::env::temp_dir().join(format!(
@@ -206,6 +209,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn retry_gives_up_after_second_failure() {
         let dir = std::env::temp_dir().join(format!(
