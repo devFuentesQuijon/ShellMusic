@@ -10,7 +10,9 @@ use crate::providers::{MusicProvider, ProviderKind, Track, provider_for_url};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
-use super::state::{App, ControlAction, Focus, Message, RadioMode, RepeatMode};
+use super::state::{
+    App, ControlAction, Focus, Message, RadioMode, RepeatMode, SleepTimer, UndoAction,
+};
 
 /// Libera la petición de control pendiente si una búsqueda más reciente (de
 /// la UI o de otra petición) dejó su epoch obsoleto: el cliente recibe error
@@ -21,12 +23,10 @@ pub(super) fn release_stale_control_pending(app: &mut App) {
         .control_pending
         .as_ref()
         .is_some_and(|pending| pending.epoch != app.search_epoch);
-    if stale
-        && let Some(pending) = app.control_pending.take()
-    {
-        let _ = pending
-            .reply
-            .send(crate::control::fail("la búsqueda fue reemplazada por otra más reciente"));
+    if stale && let Some(pending) = app.control_pending.take() {
+        let _ = pending.reply.send(crate::control::fail(
+            "la búsqueda fue reemplazada por otra más reciente",
+        ));
     }
 }
 
@@ -98,13 +98,16 @@ pub(super) fn handle_msg(
             }
         }
         AppMsg::Error(err) => app.message = Some(Message::error(err)),
-        AppMsg::LyricsDone(result) => {
-            app.lyrics_text = Some(match result {
-                Ok(text) => text,
-                Err(err) => format!("No se pudo cargar la letra: {err}"),
-            });
-            app.lyrics_scroll = 0;
-        }
+        AppMsg::LyricsDone(result) => match result {
+            Ok(lyrics) => {
+                app.lyrics_synced = lyrics.synced;
+                app.lyrics_text = Some(lyrics.plain);
+            }
+            Err(err) => {
+                app.lyrics_synced = None;
+                app.lyrics_text = Some(format!("No se pudo cargar la letra: {err}"));
+            }
+        },
         AppMsg::CoverDone(Ok(cover)) => {
             // PNG para la notificación con carátula (best-effort: si el
             // disco falla, la notificación irá sin imagen).
@@ -212,12 +215,18 @@ pub(super) fn toggle_favorite(app: &mut App, track: Option<Track>) {
         return;
     };
     if app.favorites.toggle(&track) {
-        app.message = Some(Message::info(format!("★ añadida a favoritos: {}", track.title)));
+        app.message = Some(Message::info(format!(
+            "★ añadida a favoritos: {}",
+            track.title
+        )));
         if app.favorites_selected().is_none() {
             app.favorites_select(0);
         }
     } else {
-        app.message = Some(Message::info(format!("quitada de favoritos: {}", track.title)));
+        app.message = Some(Message::info(format!(
+            "quitada de favoritos: {}",
+            track.title
+        )));
     }
     app.save_favorites();
 }
@@ -254,7 +263,10 @@ pub(super) fn submit_search(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     let tx = tx.clone();
     let limit = app.results_limit;
     tokio::spawn(async move {
-        let result = provider.search(&query, limit).await.map_err(|e| e.to_string());
+        let result = provider
+            .search(&query, limit)
+            .await
+            .map_err(|e| e.to_string());
         let _ = tx.send(AppMsg::SearchDone(epoch, result));
     });
 }
@@ -364,11 +376,23 @@ pub(super) fn play_adjacent(
     }
 }
 
-pub(super) fn autoplay_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>) {
+pub(super) fn autoplay_next(
+    app: &mut App,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
     if app.queue.current.is_none() {
         return;
     }
     app.playback_active = false;
+    // Sleep timer «al terminar la pista»: se consume aquí, antes de cualquier
+    // repetición o radio, y detiene en vez de pasar a la siguiente. El aviso
+    // va después de `stop_playback` para no pisar su mensaje «detenido».
+    if matches!(app.sleep_timer.take(), Some(SleepTimer::AfterTrack)) {
+        stop_playback(app, player, tx);
+        app.message = Some(Message::info("sleep timer: deteniendo la reproducción"));
+        return;
+    }
     if app.repeat == RepeatMode::One {
         app.mpv_appended = None;
         play_queue_track(app, player, tx, app.queue.current.unwrap());
@@ -455,7 +479,11 @@ fn scrobble_leaving_standalone(app: &mut App) {
 /// `mpv_appended`; el avance solo se confía si al terminar la clave encaja
 /// con la pista que toca. Con repetición «one» no se apila: la siguiente
 /// «reproducción» es la misma pista y se recarga con replace.
-fn gapless_append_next(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>) {
+fn gapless_append_next(
+    app: &mut App,
+    player: &Arc<dyn Player>,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+) {
     app.mpv_appended = None;
     if !app.gapless || app.repeat == RepeatMode::One {
         return;
@@ -547,9 +575,7 @@ pub(super) fn confirm_track_start(app: &mut App, tx: &mpsc::UnboundedSender<AppM
 /// Scrobble de la pista que deja de sonar (si cumple las reglas). Se llama
 /// en cada punto de salida: cambio de pista, stop y cierre de la app.
 pub(super) fn scrobble_leaving(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
-    let (Some(client), Some((track, started))) =
-        (app.lastfm.clone(), app.playing.clone())
-    else {
+    let (Some(client), Some((track, started))) = (app.lastfm.clone(), app.playing.clone()) else {
         return;
     };
     let Ok(elapsed) = started.elapsed() else {
@@ -668,7 +694,9 @@ fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
     match app.radio_mode {
         RadioMode::Artista => {
             let artist = track.artist.clone();
-            app.message = Some(Message::info(format!("radio: buscando pistas de «{artist}»…")));
+            app.message = Some(Message::info(format!(
+                "radio: buscando pistas de «{artist}»…"
+            )));
             spawn_radio_search(provider, artist.clone(), artist, limit, 0, false, epoch, tx);
         }
         RadioMode::Similares => {
@@ -699,7 +727,16 @@ fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
                     "radio: buscando similares a «{}»…",
                     track.title
                 )));
-                spawn_radio_search(provider, track.artist.clone(), query, limit, 0, false, epoch, tx);
+                spawn_radio_search(
+                    provider,
+                    track.artist.clone(),
+                    query,
+                    limit,
+                    0,
+                    false,
+                    epoch,
+                    tx,
+                );
             }
         }
         RadioMode::Random => {
@@ -731,7 +768,16 @@ fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
                 "radio: buscando rarezas de «{artist}»…"
             )));
             // Pide el tope y descarta los primeros hits; baraja el resto.
-            spawn_radio_search(provider, artist.clone(), artist, 50, RAREZAS_SKIP_HITS, true, epoch, tx);
+            spawn_radio_search(
+                provider,
+                artist.clone(),
+                artist,
+                50,
+                RAREZAS_SKIP_HITS,
+                true,
+                epoch,
+                tx,
+            );
         }
     }
 }
@@ -745,7 +791,16 @@ fn radio_expand_random_genero(
 ) {
     let keyword = RANDOM_GENERO_KEYWORDS[crate::random::below(RANDOM_GENERO_KEYWORDS.len())];
     app.message = Some(Message::info(format!("radio: azar «{keyword}»…")));
-    spawn_radio_search(provider, keyword.to_string(), keyword.to_string(), limit, 0, true, epoch, tx);
+    spawn_radio_search(
+        provider,
+        keyword.to_string(),
+        keyword.to_string(),
+        limit,
+        0,
+        true,
+        epoch,
+        tx,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -841,25 +896,87 @@ pub(super) fn remove_from_queue(
     let Some(index) = app.queue_selected() else {
         return;
     };
+    let removed_track = app.queue.tracks.get(index).cloned();
     match app.queue.remove(index) {
         Some(Removed::CurrentWithSuccessor(successor)) => {
-            app.message = Some(Message::info("eliminada; saltando a la siguiente"));
+            app.message = Some(Message::info(
+                "eliminada; saltando a la siguiente (u deshacer)",
+            ));
             play_queue_track(app, player, tx, successor);
         }
         Some(Removed::CurrentWithoutSuccessor) => {
-            app.message = Some(Message::info("eliminada la pista que sonaba; detenido"));
+            app.message = Some(Message::info(
+                "eliminada la pista que sonaba; detenido (u deshacer)",
+            ));
             app.radio_epoch += 1;
             spawn_player(player, tx, |p| async move { p.stop().await });
         }
         Some(Removed::Other) => {
-            app.message = Some(Message::info("eliminada de la cola"));
+            app.message = Some(Message::info("eliminada de la cola (u deshacer)"));
         }
         None => return,
+    }
+    if let Some(track) = removed_track {
+        app.undo = Some(UndoAction::QueueTrack { track, index });
     }
     if app.queue.is_empty() {
         app.queue_state.select(None);
     } else {
         app.queue_select(index);
+    }
+}
+
+/// u: deshace el último borrado reversible (un solo nivel: cada borrado
+/// sustituye al anterior). Reinserta la pista en su posición sin tocar la
+/// reproducción en curso: si la inserción queda por delante de la actual,
+/// el índice de esta se desplaza.
+pub(super) fn undo_last(app: &mut App) {
+    match app.undo.take() {
+        Some(UndoAction::QueueTrack { track, index }) => {
+            let index = index.min(app.queue.tracks.len());
+            app.queue.tracks.insert(index, track.clone());
+            if let Some(current) = app.queue.current
+                && current >= index
+            {
+                app.queue.current = Some(current + 1);
+            }
+            app.queue_select(index);
+            app.message = Some(Message::info(format!(
+                "deshacer: «{}» vuelve a la cola",
+                track.title
+            )));
+        }
+        Some(UndoAction::Favorite { track, index }) => {
+            let index = index.min(app.favorites.tracks.len());
+            app.favorites.tracks.insert(index, track.clone());
+            app.save_favorites();
+            app.favorites_select(index);
+            app.message = Some(Message::info(format!(
+                "deshacer: «{}» vuelve a favoritos",
+                track.title
+            )));
+        }
+        Some(UndoAction::PlaylistTrack {
+            playlist,
+            track,
+            index,
+        }) => match app.playlists.items.get_mut(playlist) {
+            Some(pl) => {
+                let index = index.min(pl.tracks.len());
+                pl.tracks.insert(index, track.clone());
+                app.save_playlists();
+                app.message = Some(Message::info(format!(
+                    "deshacer: «{}» vuelve a la playlist",
+                    track.title
+                )));
+            }
+            None => {
+                app.message = Some(Message::info(
+                    "deshacer imposible: la playlist ya no existe",
+                ));
+            }
+        },
+        None => app.message = Some(Message::info("nada que deshacer")),
     }
 }
 
@@ -876,7 +993,9 @@ pub(super) fn change_volume(
     let tx = tx.clone();
     tokio::spawn(async move {
         if let Err(err) = player.set_volume(volume).await {
-            let _ = tx.send(AppMsg::Error(format!("no se pudo ajustar el volumen: {err}")));
+            let _ = tx.send(AppMsg::Error(format!(
+                "no se pudo ajustar el volumen: {err}"
+            )));
         }
     });
 }
@@ -916,13 +1035,17 @@ pub(super) fn request_cover(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
             image::load_from_memory(&bytes).map_err(|err| err.to_string())
         }
         .await;
-        let _ = tx.send(AppMsg::CoverDone(result.map(|image| super::CoverImage {
-            track: key.clone(),
-            image,
-        }).map_err(|message| super::CoverError {
-            message,
-            track: key,
-        })));
+        let _ = tx.send(AppMsg::CoverDone(
+            result
+                .map(|image| super::CoverImage {
+                    track: key.clone(),
+                    image,
+                })
+                .map_err(|message| super::CoverError {
+                    message,
+                    track: key,
+                }),
+        ));
     });
 }
 
@@ -947,7 +1070,10 @@ pub(super) fn open_lyrics(app: &mut App, track: Option<Track>, tx: &mpsc::Unboun
     };
     app.lyrics_title = format!("{} — {}", track.title, track.artist);
     app.lyrics_text = None;
+    app.lyrics_synced = None;
+    app.lyrics_track = Some((track.provider, track.id.clone()));
     app.lyrics_scroll = 0;
+    app.lyrics_follow = true;
     app.overlay = super::state::Overlay::Lyrics;
     let tx = tx.clone();
     tokio::spawn(async move {
@@ -993,7 +1119,9 @@ mod tests {
         let mut queue = Queue::new();
         queue.add(track("en-cola"));
         let played: HashSet<(ProviderKind, String)> =
-            [(ProviderKind::Youtube, "vista".to_string())].into_iter().collect();
+            [(ProviderKind::Youtube, "vista".to_string())]
+                .into_iter()
+                .collect();
         let results = vec![
             track("vista"),
             track("en-cola"),
@@ -1026,7 +1154,10 @@ mod tests {
             "enjoy the silence"
         );
         assert_eq!(
-            normalize_title("Depeche Mode - Enjoy The Silence [Official Video]", "Depeche Mode"),
+            normalize_title(
+                "Depeche Mode - Enjoy The Silence [Official Video]",
+                "Depeche Mode"
+            ),
             "enjoy the silence"
         );
         // Títulos distintos no colapsan
@@ -1263,7 +1394,11 @@ mod tests {
         let epoch = app.radio_epoch;
         handle_msg(
             &mut app,
-            AppMsg::RadioDone("artista".to_string(), Ok(vec![track("x"), track("y")]), epoch),
+            AppMsg::RadioDone(
+                "artista".to_string(),
+                Ok(vec![track("x"), track("y")]),
+                epoch,
+            ),
             &player,
             &tx,
         );
@@ -1305,7 +1440,9 @@ mod tests {
             Some((ProviderKind::Youtube, "a".to_string()))
         );
         assert!(
-            app.message.as_ref().is_some_and(|m| m.text.contains("buscando")),
+            app.message
+                .as_ref()
+                .is_some_and(|m| m.text.contains("buscando")),
             "mensaje de búsqueda en curso"
         );
 
@@ -1370,7 +1507,10 @@ mod tests {
         );
         assert_eq!(app.queue.len(), 1, "la segunda búsqueda no auto-reproduce");
         assert_eq!(app.results[0].id, "z");
-        assert!(app.queue.current.is_some(), "la reproducción sigue en la pista x");
+        assert!(
+            app.queue.current.is_some(),
+            "la reproducción sigue en la pista x"
+        );
     }
 
     #[tokio::test]
@@ -1387,7 +1527,10 @@ mod tests {
             &player,
             &tx,
         );
-        assert!(!app.autoplay_first, "sin resultados el flag también se consume");
+        assert!(
+            !app.autoplay_first,
+            "sin resultados el flag también se consume"
+        );
         assert!(app.queue.is_empty());
     }
 
@@ -1406,17 +1549,131 @@ mod tests {
         let epoch = app.radio_epoch;
         handle_msg(
             &mut app,
-            AppMsg::RadioDone("artista".to_string(), Ok(vec![track("x"), track("y")]), epoch),
+            AppMsg::RadioDone(
+                "artista".to_string(),
+                Ok(vec![track("x"), track("y")]),
+                epoch,
+            ),
             &player,
             &tx,
         );
         // Podadas las antiguas (margen de KEEP_BEFORE_CURRENT) + 2 nuevas.
-        assert_eq!(
-            app.queue.len(),
-            crate::queue::KEEP_BEFORE_CURRENT + 5 + 2
-        );
+        assert_eq!(app.queue.len(), crate::queue::KEEP_BEFORE_CURRENT + 5 + 2);
         let current = app.queue.current.unwrap();
-        assert_eq!(app.queue.tracks[current].id, format!("t{}", crate::queue::MAX_QUEUE + 5));
+        assert_eq!(
+            app.queue.tracks[current].id,
+            format!("t{}", crate::queue::MAX_QUEUE + 5)
+        );
         assert_eq!(app.queue.next_index(), Some(current + 1));
+    }
+
+    fn app_with_tracks(name: &str, ids: &[&str]) -> App {
+        let mut app = App::with_data_dir(
+            &crate::config::Config::default(),
+            &std::env::temp_dir().join(format!(
+                "shellmusic-{name}-{}-{:016x}",
+                std::process::id(),
+                crate::state_file::random_suffix()
+            )),
+        )
+        .unwrap();
+        for id in ids {
+            app.queue.add(track(id));
+        }
+        app
+    }
+
+    #[tokio::test]
+    async fn sleep_after_track_stops_instead_of_advancing() {
+        let mut app = app_with_tracks("sleep-track", &["a", "b"]);
+        app.queue.current = Some(0);
+        app.sleep_timer = Some(SleepTimer::AfterTrack);
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        autoplay_next(&mut app, &player, &tx);
+        assert_eq!(app.queue.current, None, "detiene en vez de pasar a b");
+        assert!(!app.playback_active);
+        assert_eq!(app.sleep_timer, None, "el timer se consume al disparar");
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|m| m.text.contains("sleep")),
+            "avisa del motivo de la parada"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_from_queue_records_undo() {
+        let mut app = app_with_tracks("undo-cola", &["a", "b", "c"]);
+        app.queue.current = Some(0);
+        app.queue_select(1);
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        remove_from_queue(&mut app, &player, &tx);
+        assert_eq!(app.queue.len(), 2);
+        match app.undo.take() {
+            Some(UndoAction::QueueTrack { track, index }) => {
+                assert_eq!(track.id, "b");
+                assert_eq!(index, 1);
+            }
+            other => panic!("undo de cola esperado: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn undo_queue_track_restores_position_and_shifts_current() {
+        // La pista restaurada queda detrás de la actual: current no se toca.
+        let mut app = app_with_tracks("undo-cola-detras", &["a", "c"]);
+        app.queue.current = Some(1);
+        app.undo = Some(UndoAction::QueueTrack {
+            track: track("b"),
+            index: 1,
+        });
+        undo_last(&mut app);
+        let ids: Vec<&str> = app.queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(app.queue.current, Some(2), "la actual es ahora c");
+
+        // Y si queda por delante, la actual se desplaza para seguir
+        // apuntando a la misma pista.
+        let mut app = app_with_tracks("undo-cola-delante", &["b", "c"]);
+        app.queue.current = Some(0);
+        app.undo = Some(UndoAction::QueueTrack {
+            track: track("a"),
+            index: 0,
+        });
+        undo_last(&mut app);
+        let ids: Vec<&str> = app.queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+        assert_eq!(app.queue.current, Some(1), "b sigue sonando");
+        assert_eq!(app.queue_selected(), Some(0), "selección en la restaurada");
+    }
+
+    #[test]
+    fn undo_without_action_says_so() {
+        let mut app = app_with_tracks("undo-vacio", &["a"]);
+        undo_last(&mut app);
+        assert!(
+            app.message
+                .as_ref()
+                .is_some_and(|m| m.text.contains("nada que deshacer")),
+            "mensaje honesto sin undo pendiente"
+        );
+    }
+
+    #[test]
+    fn undo_favorite_restores_at_index() {
+        let mut app = app_with_tracks("undo-fav", &[]);
+        app.favorites.add(track("a"));
+        app.favorites.add(track("c"));
+        app.undo = Some(UndoAction::Favorite {
+            track: track("b"),
+            index: 1,
+        });
+        undo_last(&mut app);
+        let ids: Vec<&str> = app.favorites.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"], "recuperada en su posición");
     }
 }

@@ -4,7 +4,21 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Gauge};
 
 use super::fmt_duration;
-use crate::app::App;
+use crate::app::{App, SleepTimer};
+
+/// Etiqueta del temporizador de apagado para la barra: `⏳mm:ss` o `⏳fin pista`.
+pub(crate) fn sleep_label(timer: Option<SleepTimer>) -> String {
+    match timer {
+        Some(SleepTimer::AfterTrack) => "  ⏳fin pista".to_string(),
+        Some(SleepTimer::At(deadline)) => {
+            let secs = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_secs();
+            format!("  ⏳{}:{:02}", secs / 60, secs % 60)
+        }
+        None => String::new(),
+    }
+}
 
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let (ratio, label) = match app.queue.current_track() {
@@ -23,14 +37,15 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 String::new()
             };
             let meta = format!(
-                "  {}/{}  cola {}/{}  vol:{}{}{}",
+                "  {}/{}  cola {}/{}  vol:{}{}{}{}",
                 fmt_duration(app.status.position),
                 fmt_duration(app.status.duration.or(track.duration)),
                 position,
                 app.queue.len(),
                 app.status.volume,
                 app.repeat.bar_label(),
-                radio
+                radio,
+                sleep_label(app.sleep_timer)
             );
             // Los títulos pueden ser larguísimos: se truncan para que los
             // metadatos (progreso, cola, volumen, repetición, radio)
@@ -50,10 +65,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             (
                 0.0,
                 format!(
-                    "Sin reproducción · vol:{}{}{}",
+                    "Sin reproducción · vol:{}{}{}{}",
                     app.status.volume,
                     app.repeat.bar_label(),
-                    radio
+                    radio,
+                    sleep_label(app.sleep_timer)
                 ),
             )
         }

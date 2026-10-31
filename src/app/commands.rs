@@ -12,7 +12,7 @@ use crate::queue::Queue;
 
 use super::AppMsg;
 use super::playback::{change_volume, play_adjacent, spawn_player};
-use super::state::{App, Message, Overlay};
+use super::state::{App, Message, Overlay, SleepTimer};
 
 type CommandFn = fn(&mut App, &Arc<dyn Player>, &mpsc::UnboundedSender<AppMsg>, &str);
 
@@ -26,20 +26,81 @@ struct Command {
 }
 
 const COMMANDS: &[Command] = &[
-    Command { label: "pause", name: "pause", run: pause },
-    Command { label: "stop", name: "stop", run: stop },
-    Command { label: "next", name: "next", run: next },
-    Command { label: "prev", name: "prev", run: prev },
-    Command { label: "vol up", name: "vol up", run: vol_up },
-    Command { label: "vol down", name: "vol down", run: vol_down },
-    Command { label: "vol <n>", name: "vol", run: vol_set },
-    Command { label: "theme <nombre>", name: "theme", run: theme_set },
-    Command { label: "radio on", name: "radio on", run: radio_on },
-    Command { label: "radio off", name: "radio off", run: radio_off },
-    Command { label: "stats", name: "stats", run: stats },
-    Command { label: "playlists", name: "playlists", run: playlists },
-    Command { label: "help", name: "help", run: help },
-    Command { label: "quit", name: "quit", run: quit },
+    Command {
+        label: "pause",
+        name: "pause",
+        run: pause,
+    },
+    Command {
+        label: "stop",
+        name: "stop",
+        run: stop,
+    },
+    Command {
+        label: "next",
+        name: "next",
+        run: next,
+    },
+    Command {
+        label: "prev",
+        name: "prev",
+        run: prev,
+    },
+    Command {
+        label: "vol up",
+        name: "vol up",
+        run: vol_up,
+    },
+    Command {
+        label: "vol down",
+        name: "vol down",
+        run: vol_down,
+    },
+    Command {
+        label: "vol <n>",
+        name: "vol",
+        run: vol_set,
+    },
+    Command {
+        label: "theme <nombre>",
+        name: "theme",
+        run: theme_set,
+    },
+    Command {
+        label: "sleep <min|off|track>",
+        name: "sleep",
+        run: sleep_set,
+    },
+    Command {
+        label: "radio on",
+        name: "radio on",
+        run: radio_on,
+    },
+    Command {
+        label: "radio off",
+        name: "radio off",
+        run: radio_off,
+    },
+    Command {
+        label: "stats",
+        name: "stats",
+        run: stats,
+    },
+    Command {
+        label: "playlists",
+        name: "playlists",
+        run: playlists,
+    },
+    Command {
+        label: "help",
+        name: "help",
+        run: help,
+    },
+    Command {
+        label: "quit",
+        name: "quit",
+        run: quit,
+    },
 ];
 
 /// Comandos visibles para una entrada: con entrada vacía, todos; si no, los
@@ -49,9 +110,7 @@ pub(crate) fn matching(input: &str) -> Vec<&'static str> {
     let first = input.split_whitespace().next().unwrap_or("");
     COMMANDS
         .iter()
-        .filter(|c| {
-            input.is_empty() || c.label.contains(first) || c.label.contains(input)
-        })
+        .filter(|c| input.is_empty() || c.label.contains(first) || c.label.contains(input))
         .map(|c| c.label)
         .take(8)
         .collect()
@@ -111,7 +170,9 @@ fn vol_down(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<
 /// `vol <n>`: fija el volumen absoluto (0-100).
 fn vol_set(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, arg: &str) {
     let Ok(target) = arg.parse::<i16>() else {
-        app.message = Some(Message::error(format!("uso: vol <0-100> (recibido «{arg}»)")));
+        app.message = Some(Message::error(format!(
+            "uso: vol <0-100> (recibido «{arg}»)"
+        )));
         return;
     };
     let delta = target.clamp(0, 100) - i16::from(app.status.volume);
@@ -131,6 +192,57 @@ fn theme_set(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMs
                 crate::theme::preset_names().join(", ")
             )));
         }
+    }
+}
+
+/// `sleep <arg>`: programa la parada. "off"/"0" lo cancela; "track" detiene
+/// al terminar la pista en curso; un número (sufijo `s` = segundos, `m` o
+/// nada = minutos) detiene al cabo de ese tiempo.
+fn sleep_set(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, arg: &str) {
+    match parse_sleep(arg) {
+        Ok(Some(minutes)) => {
+            let duration = std::time::Duration::from_secs(minutes * 60);
+            app.sleep_timer = Some(SleepTimer::At(std::time::Instant::now() + duration));
+            app.message = Some(Message::info(format!("sleep: stop en {minutes} min")));
+        }
+        Ok(None) => {
+            app.sleep_timer = Some(SleepTimer::AfterTrack);
+            app.message = Some(Message::info("sleep: stop al terminar la pista"));
+        }
+        Err(()) if arg.trim().eq_ignore_ascii_case("off") || arg.trim() == "0" => {
+            if app.sleep_timer.take().is_some() {
+                app.message = Some(Message::info("sleep timer cancelado"));
+            } else {
+                app.message = Some(Message::info("no hay sleep timer activo"));
+            }
+        }
+        Err(()) => {
+            app.message = Some(Message::error(format!(
+                "uso: sleep <minutos|off|track> (recibido «{arg}»)"
+            )));
+        }
+    }
+}
+
+/// Parsea el argumento de `sleep`: Ok(Some(minutos)), Ok(None) = «track»,
+/// Err(()) = argumento inválido (el caller distingue «off»).
+fn parse_sleep(arg: &str) -> Result<Option<u64>, ()> {
+    let arg = arg.trim().to_lowercase();
+    if matches!(arg.as_str(), "track" | "pista") {
+        return Ok(None);
+    }
+    let (digits, unit) = arg
+        .strip_suffix(['s', 'm'])
+        .map_or((arg.as_str(), 'm'), |d| {
+            (d, arg.chars().last().unwrap_or('m'))
+        });
+    let value: u64 = digits.trim().parse().map_err(|_| ())?;
+    if value == 0 {
+        return Err(());
+    }
+    match unit {
+        's' => Ok(Some(value.div_ceil(60))),
+        _ => Ok(Some(value)),
     }
 }
 
@@ -204,7 +316,10 @@ mod tests {
         // El arg es todo lo que sobra tras el prefijo más largo.
         assert_eq!(arg_for("vol 42"), Some(("vol", "42".to_string())));
         assert_eq!(arg_for("vol up"), Some(("vol up", String::new())));
-        assert_eq!(arg_for("theme dracula"), Some(("theme", "dracula".to_string())));
+        assert_eq!(
+            arg_for("theme dracula"),
+            Some(("theme", "dracula".to_string()))
+        );
         assert_eq!(arg_for("inventado"), None);
     }
 
@@ -216,5 +331,23 @@ mod tests {
             .filter(|c| input == c.name || input.starts_with(&format!("{} ", c.name)))
             .max_by_key(|c| c.name.len())
             .map(|c| (c.name, input[c.name.len()..].trim().to_string()))
+    }
+
+    #[test]
+    fn parse_sleep_minutes_seconds_track_and_invalid() {
+        // Minutos (con o sin sufijo m) y redondeo de segundos a minuto arriba.
+        assert_eq!(parse_sleep("15"), Ok(Some(15)));
+        assert_eq!(parse_sleep("15m"), Ok(Some(15)));
+        assert_eq!(parse_sleep("90s"), Ok(Some(2)), "90 s redondea a 2 min");
+        assert_eq!(parse_sleep("30s"), Ok(Some(1)));
+        // «Al terminar la pista».
+        assert_eq!(parse_sleep("track"), Ok(None));
+        assert_eq!(parse_sleep("pista"), Ok(None));
+        // Inválidos: el caller distingue «off»/«0» del resto de basura.
+        assert_eq!(parse_sleep("0"), Err(()));
+        assert_eq!(parse_sleep("off"), Err(()));
+        assert_eq!(parse_sleep("xyz"), Err(()));
+        assert_eq!(parse_sleep("5h"), Err(()));
+        assert_eq!(parse_sleep(""), Err(()));
     }
 }

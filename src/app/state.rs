@@ -44,16 +44,25 @@ impl Focus {
     }
 }
 
+/// Aviso en la línea de estado. Los informativos caducan y vuelven a la
+/// ayuda contextual (comportamiento toast); los errores persisten hasta la
+/// siguiente acción.
 pub struct Message {
     pub text: String,
     pub is_error: bool,
+    /// Momento de creación: la caducidad de los informativos se mide desde aquí.
+    pub created: std::time::Instant,
 }
+
+/// Cuánto aguantan los mensajes informativos en la línea de estado.
+pub const MESSAGE_TTL: std::time::Duration = std::time::Duration::from_secs(6);
 
 impl Message {
     pub(super) fn info(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             is_error: false,
+            created: std::time::Instant::now(),
         }
     }
 
@@ -61,8 +70,34 @@ impl Message {
         Self {
             text: text.into(),
             is_error: true,
+            created: std::time::Instant::now(),
         }
     }
+}
+
+/// Temporizador de apagado (fase 24): cuándo detener la reproducción.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SleepTimer {
+    /// Detener al llegar este instante.
+    At(std::time::Instant),
+    /// Detener al terminar naturalmente la pista en curso.
+    AfterTrack,
+}
+
+/// Acción destructiva reversible, para deshacerla con `u` (un solo nivel:
+/// cada borrado sustituye al anterior).
+#[derive(Debug, Clone)]
+pub enum UndoAction {
+    /// Pista quitada de la cola en ese índice.
+    QueueTrack { track: Track, index: usize },
+    /// Pista quitada de favoritos en ese índice.
+    Favorite { track: Track, index: usize },
+    /// Pista quitada del contenido de esa playlist en ese índice.
+    PlaylistTrack {
+        playlist: usize,
+        track: Track,
+        index: usize,
+    },
 }
 
 /// Sub-modo de la radio: de dónde salen las pistas al agotarse la cola.
@@ -381,6 +416,19 @@ pub struct App {
     pub stats_top: Vec<Track>,
     /// Texto de la letra en el overlay (None = cargando).
     pub lyrics_text: Option<String>,
+    /// Letra sincronizada (lrclib, LRC): instante en segundos y texto de línea.
+    /// None cuando la entrada solo tenía letra plana.
+    pub lyrics_synced: Option<Vec<(f64, String)>>,
+    /// Pista a la que pertenece la letra cargada: solo si coincide con la que
+    /// suena la vista sincronizada sigue la reproducción.
+    pub lyrics_track: Option<(ProviderKind, String)>,
+    /// Auto-seguimiento de la letra sincronizada: el scroll sigue a la línea
+    /// activa. Cualquier scroll manual lo desactiva; `f` lo reactiva.
+    pub lyrics_follow: bool,
+    /// Temporizador de apagado activo, si lo hay.
+    pub sleep_timer: Option<SleepTimer>,
+    /// Último borrado reversible (tecla `u`).
+    pub undo: Option<UndoAction>,
     /// Título de la pista de la letra cargada/pedida.
     pub lyrics_title: String,
     /// Scroll del overlay de letras (líneas).
@@ -418,9 +466,7 @@ pub struct App {
 
 impl App {
     pub fn new(config: &Config) -> anyhow::Result<Self> {
-        let data_dir = dirs::data_dir()
-            .unwrap_or_default()
-            .join("shellmusic");
+        let data_dir = dirs::data_dir().unwrap_or_default().join("shellmusic");
         Self::with_data_dir(config, &data_dir)
     }
 
@@ -541,6 +587,11 @@ impl App {
             stats_state: ListState::default(),
             stats_top: Vec::new(),
             lyrics_text: None,
+            lyrics_synced: None,
+            lyrics_track: None,
+            lyrics_follow: true,
+            sleep_timer: None,
+            undo: None,
             lyrics_title: String::new(),
             lyrics_scroll: 0,
             picker: None,
@@ -601,7 +652,11 @@ impl App {
     /// Cicla el sub-modo de la radio (tecla R).
     pub fn next_radio_mode(&mut self) {
         self.radio_mode = self.radio_mode.next();
-        let note = if self.radio { "" } else { " (radio inactiva: actívala con r)" };
+        let note = if self.radio {
+            ""
+        } else {
+            " (radio inactiva: actívala con r)"
+        };
         self.message = Some(Message::info(format!(
             "Modo radio: {}{note}",
             self.radio_mode
@@ -650,7 +705,11 @@ impl App {
     /// Índices reales de favoritos visibles con el filtro actual (todos si
     /// no hay filtro activo o está vacío).
     pub fn visible_favorites(&self) -> Vec<usize> {
-        visible_indices(&self.favorites.tracks, &self.favorites_filter, &self.favorites_filter_state)
+        visible_indices(
+            &self.favorites.tracks,
+            &self.favorites_filter,
+            &self.favorites_filter_state,
+        )
     }
 
     /// Pista de favoritos en la posición visible (doble indirección
@@ -681,7 +740,12 @@ impl App {
     /// Pista del contenido en la posición visible.
     pub fn content_at(&self, playlist: usize, visible: usize) -> Option<Track> {
         let real = self.content_real_index(playlist, visible)?;
-        self.playlists.items.get(playlist)?.tracks.get(real).cloned()
+        self.playlists
+            .items
+            .get(playlist)?
+            .tracks
+            .get(real)
+            .cloned()
     }
 
     /// Selección de contenido clampeada a la lista visible.
@@ -856,8 +920,11 @@ impl App {
         };
         match action {
             PathAction::ExportJson(scope) => {
-                let text =
-                    crate::portable::export_json(*scope, &self.favorites.tracks, &self.playlists.items);
+                let text = crate::portable::export_json(
+                    *scope,
+                    &self.favorites.tracks,
+                    &self.playlists.items,
+                );
                 match crate::portable::write_export(&path, &text) {
                     Ok(()) => {
                         self.message =
@@ -865,9 +932,7 @@ impl App {
                         self.overlay = Overlay::Closed;
                     }
                     Err(err) => {
-                        self.message = Some(Message::error(format!(
-                            "no se pudo exportar: {err}"
-                        )));
+                        self.message = Some(Message::error(format!("no se pudo exportar: {err}")));
                     }
                 }
             }
@@ -885,9 +950,7 @@ impl App {
                         self.overlay = Overlay::Content(self.playlist_index_of(playlist));
                     }
                     Err(err) => {
-                        self.message = Some(Message::error(format!(
-                            "no se pudo exportar: {err}"
-                        )));
+                        self.message = Some(Message::error(format!("no se pudo exportar: {err}")));
                     }
                 }
             }
@@ -980,12 +1043,7 @@ impl App {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("importada");
-        let index = match self
-            .playlists
-            .items
-            .iter()
-            .position(|p| p.name == name)
-        {
+        let index = match self.playlists.items.iter().position(|p| p.name == name) {
             Some(index) => index,
             None => self.playlists.create(name)?,
         };
@@ -1002,11 +1060,7 @@ impl App {
 
 /// Índices de `tracks` que cumplen el filtro (subcadena insensible a mayús-
 /// culas en título/artista). Sin filtro activo o con filtro vacío, todos.
-fn visible_indices(
-    tracks: &[Track],
-    filter: &str,
-    state: &FilterState,
-) -> Vec<usize> {
+fn visible_indices(tracks: &[Track], filter: &str, state: &FilterState) -> Vec<usize> {
     let active = !matches!(state, FilterState::Off) && !filter.is_empty();
     if !active {
         return (0..tracks.len()).collect();
@@ -1115,9 +1169,11 @@ mod tests {
             crate::state_file::random_suffix()
         ));
         let mut app = App::with_data_dir(&Config::default(), &dir).unwrap();
-        app.favorites.add(track_named("a", "One More Time", "Daft Punk"));
+        app.favorites
+            .add(track_named("a", "One More Time", "Daft Punk"));
         app.favorites.add(track_named("b", "Bohemian", "Queen"));
-        app.favorites.add(track_named("c", "Around the World", "Daft Punk"));
+        app.favorites
+            .add(track_named("c", "Around the World", "Daft Punk"));
 
         // Sin filtro: identidad.
         assert_eq!(app.visible_favorites(), vec![0, 1, 2]);
@@ -1149,7 +1205,8 @@ mod tests {
         let pl = app.playlists.create("mix").unwrap();
         app.playlists.add_track(pl, track_named("a", "Alpha", "X"));
         app.playlists.add_track(pl, track_named("b", "Beta", "Y"));
-        app.playlists.add_track(pl, track_named("c", "Alphabet", "Z"));
+        app.playlists
+            .add_track(pl, track_named("c", "Alphabet", "Z"));
 
         app.content_filter = "alp".to_string();
         app.content_filter_state = FilterState::Applied;
@@ -1225,7 +1282,12 @@ mod tests {
         assert!(summary.contains("0 favoritos"), "{summary}");
         assert_eq!(app.favorites.tracks.len(), 1);
         assert_eq!(app.playlists.items.len(), 2);
-        let mix = app.playlists.items.iter().find(|p| p.name == "mix").unwrap();
+        let mix = app
+            .playlists
+            .items
+            .iter()
+            .find(|p| p.name == "mix")
+            .unwrap();
         assert_eq!(mix.tracks.len(), 1, "sin pista duplicada en la merge");
     }
 
@@ -1240,11 +1302,17 @@ mod tests {
             )),
         )
         .unwrap();
-        let text = "#EXTM3U\n#EXTINF:200,artista - canción\nhttps://www.youtube.com/watch?v=abc123\n";
+        let text =
+            "#EXTM3U\n#EXTINF:200,artista - canción\nhttps://www.youtube.com/watch?v=abc123\n";
         let path = std::path::Path::new("/tmp/mi mix.m3u");
         let summary = app.import_m3u_text(path, text).unwrap();
         assert!(summary.contains("1 pistas"), "{summary}");
-        let pl = app.playlists.items.iter().find(|p| p.name == "mi mix").unwrap();
+        let pl = app
+            .playlists
+            .items
+            .iter()
+            .find(|p| p.name == "mi mix")
+            .unwrap();
         assert_eq!(pl.tracks[0].id, "abc123");
         assert_eq!(pl.tracks[0].title, "canción");
     }

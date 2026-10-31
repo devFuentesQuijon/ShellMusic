@@ -23,7 +23,7 @@ mod state;
 
 pub use state::{
     App, FilterState, Focus, Message, NameContext, Overlay, PanelAreas, PathAction, RadioMode,
-    RepeatMode, StatsView,
+    RepeatMode, SleepTimer, StatsView, UndoAction,
 };
 
 use input::{handle_key, handle_mouse};
@@ -42,7 +42,7 @@ pub(super) enum AppMsg {
     Error(String),
     PlaybackStarted,
     RadioDone(String, Result<Vec<Track>, String>, u64),
-    LyricsDone(Result<String, String>),
+    LyricsDone(Result<crate::lyrics::Lyrics, String>),
     CoverDone(Result<CoverImage, CoverError>),
 }
 
@@ -126,8 +126,9 @@ pub async fn run(
         match crate::control::spawn_server(control_tx).await {
             Ok(()) => control_rx = Some(rx),
             Err(err) => {
-                app.message =
-                    Some(Message::info(format!("control para agentes desactivado: {err:#}")));
+                app.message = Some(Message::info(format!(
+                    "control para agentes desactivado: {err:#}"
+                )));
             }
         }
     }
@@ -172,6 +173,27 @@ pub async fn run(
             _ = tick => {
                 playback::release_stale_control_pending(&mut app);
                 periodic_save(&mut app);
+                // Los mensajes informativos son toasts: caducan y la línea de
+                // estado vuelve a la ayuda contextual. Los errores persisten.
+                if app
+                    .message
+                    .as_ref()
+                    .is_some_and(|m| !m.is_error && m.created.elapsed() >= state::MESSAGE_TTL)
+                {
+                    app.message = None;
+                    needs_redraw = true;
+                }
+                // Temporizador de apagado: al expirar detiene la reproducción.
+                // El aviso va después de parar: `stop_playback` pisa el mensaje.
+                if app
+                    .sleep_timer
+                    .is_some_and(|timer| matches!(timer, SleepTimer::At(t) if std::time::Instant::now() >= t))
+                {
+                    app.sleep_timer = None;
+                    playback::stop_playback(&mut app, &player, &tx);
+                    app.message = Some(Message::info("sleep timer: deteniendo la reproducción"));
+                    needs_redraw = true;
+                }
                 if !player_respawning
                     && let Ok(status) = player.status().await
                 {
@@ -207,7 +229,11 @@ pub async fn run(
             Some(event) = player_events.recv() => {
                 match event {
                     PlayerEvent::Notice(PlayerNotice { text, is_error }) => {
-                        app.message = Some(Message { text, is_error });
+                        app.message = Some(Message {
+                            text,
+                            is_error,
+                            created: std::time::Instant::now(),
+                        });
                     }
                     PlayerEvent::TrackEnded => autoplay_next(&mut app, &player, &tx),
                     PlayerEvent::Died => {
@@ -280,15 +306,10 @@ fn respawn_player(
     let (done_tx, done_rx) = mpsc::unbounded_channel();
     *respawn_rx = Some(done_rx);
     tokio::spawn(async move {
-        let result = crate::player::mpv::MpvPlayer::spawn(
-            volume,
-            &youtube,
-            &audio_format,
-            gapless,
-        )
-        .await
-        .map(|(player, events)| (Arc::new(player) as Arc<dyn Player>, events))
-        .map_err(|err| err.to_string());
+        let result = crate::player::mpv::MpvPlayer::spawn(volume, &youtube, &audio_format, gapless)
+            .await
+            .map(|(player, events)| (Arc::new(player) as Arc<dyn Player>, events))
+            .map_err(|err| err.to_string());
         let _ = done_tx.send(result);
     });
 }
@@ -319,8 +340,8 @@ fn handle_media_command(
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
-    use playback::{change_volume, play_adjacent, seek_by, seek_to, spawn_player};
     use crate::queue::Queue;
+    use playback::{change_volume, play_adjacent, seek_by, seek_to, spawn_player};
     match command {
         MediaCommand::Play | MediaCommand::Pause | MediaCommand::Toggle => {
             spawn_player(player, tx, |p| async move { p.toggle_pause().await });
@@ -338,7 +359,12 @@ fn handle_media_command(
             seek_by(app, player, tx, delta.as_secs().min(i32::MAX as u64) as i32);
         }
         MediaCommand::SeekBackward(delta) => {
-            seek_by(app, player, tx, -(delta.as_secs().min(i32::MAX as u64) as i32));
+            seek_by(
+                app,
+                player,
+                tx,
+                -(delta.as_secs().min(i32::MAX as u64) as i32),
+            );
         }
         MediaCommand::SetPosition(target) => {
             seek_to(app, player, tx, target);
@@ -486,9 +512,7 @@ mod tests {
             &tx,
         );
         assert!(
-            app.message
-                .as_ref()
-                .is_some_and(|m| m.text.contains("+30")),
+            app.message.as_ref().is_some_and(|m| m.text.contains("+30")),
             "seek +30 esperado"
         );
     }

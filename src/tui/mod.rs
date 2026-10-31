@@ -18,10 +18,8 @@ use ratatui::widgets::Paragraph;
 use crate::app::{App, Focus, Overlay};
 
 const HELP_SEARCH: &str = "Enter buscar · Tab panel · Esc resultados · Ctrl+C salir";
-const HELP_RESULTS: &str =
-    "Enter reproducir · a cola · f favorito · y copiar · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
-const HELP_QUEUE: &str =
-    "Enter reproducir · d eliminar · J/K mover · y copiar · ←/→ seek · l repetir · S barajar · ? ayuda · q salir";
+const HELP_RESULTS: &str = "Enter reproducir · a cola · f favorito · o artista · y copiar · ←/→ seek · 0-9 % · l repetir · ? ayuda · q salir";
+const HELP_QUEUE: &str = "Enter reproducir · d eliminar · c ir a actual · J/K mover · y copiar · ←/→ seek · l repetir · ? ayuda · q salir";
 const HELP_FAVORITES: &str =
     "Enter reproducir · a cola · d/f quitar · y copiar · ←/→ seek · l repetir · ? ayuda · q salir";
 
@@ -81,9 +79,11 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 },
                 Overlay::Help => "ayuda: Esc cierra",
                 Overlay::Stats => "estadísticas: Tab vista · Enter reproducir · Esc cierra",
-                Overlay::Lyrics => "letra: ↑/↓ scroll · Esc cierra",
+                Overlay::Lyrics => "letra: f seguir on/off · ↑/↓ scroll · Esc cierra",
                 Overlay::NowPlaying => "sonando ahora: Esc cierra",
-                Overlay::Export | Overlay::PathInput(_) => "exportar/importar: Enter confirmar · Esc cancelar",
+                Overlay::Export | Overlay::PathInput(_) => {
+                    "exportar/importar: Enter confirmar · Esc cancelar"
+                }
                 Overlay::Command => "comandos: Enter ejecutar · Esc cerrar",
                 _ => "playlists: las teclas se muestran dentro del panel",
             }

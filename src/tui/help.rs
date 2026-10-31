@@ -13,10 +13,12 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("Espacio", "play / pausa"),
             ("s", "stop"),
             ("← / →", "seek ∓5 s (Shift: ∓30 s)"),
+            ("0–9", "seek al 0–90 % de la pista"),
             ("+ / -", "volumen"),
             ("n / p", "siguiente / anterior de la cola"),
             ("l", "repetición: off → cola → pista"),
             ("S", "barajar la cola"),
+            ("u", "deshacer último borrado"),
         ],
     ),
     (
@@ -34,6 +36,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Enter", "reproducir pista"),
             ("d", "eliminar de la cola"),
+            ("c", "ir a la pista que suena"),
             ("e", "mover a continuación"),
             ("w", "guardar cola como playlist"),
             ("J / K", "mover abajo / arriba"),
@@ -52,6 +55,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         "Descubrimiento",
         &[
             ("→", "autocompletar búsqueda desde el historial"),
+            ("o", "buscar pistas del artista de la pista"),
             ("L", "letra de la pista (lrclib.net)"),
             ("i", "panel «sonando ahora» con carátula"),
         ],
@@ -86,11 +90,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
     for (title, bindings) in SECTIONS {
         lines.push(Line::from(Span::styled(
             *title,
-            Style::new().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         )));
         for (key, action) in *bindings {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {key:<16}", key = key), Style::new().fg(app.theme.highlight)),
+                Span::styled(
+                    format!("  {key:<16}", key = key),
+                    Style::new().fg(app.theme.highlight),
+                ),
                 Span::raw(*action),
             ]));
         }
@@ -101,7 +110,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Style::new().fg(app.theme.muted),
     )));
     frame.render_widget(
-        Paragraph::new(lines).block(block("Ayuda — atajos de teclado".to_string(), app.theme.accent)),
+        Paragraph::new(lines).block(block(
+            "Ayuda — atajos de teclado".to_string(),
+            app.theme.accent,
+        )),
         area,
     );
 }
