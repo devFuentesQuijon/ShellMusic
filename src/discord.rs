@@ -8,6 +8,7 @@
 //! aquí; los usuarios finales no crean nada (solo `[integrations]
 //! discord = true` y el cliente Discord abierto).
 
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::time::Duration;
 

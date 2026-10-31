@@ -267,6 +267,8 @@ fn notify(track: &Track, image: Option<std::path::PathBuf>) {
     if let Some(path) = image {
         notification.hint(notify_rust::Hint::ImagePath(path.to_string_lossy().into_owned()));
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = image; // sin `hint` fuera de Linux no hay carátula: se descarta
     let _ = notification.show();
 }
 
