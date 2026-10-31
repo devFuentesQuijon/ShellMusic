@@ -255,13 +255,15 @@ fn map_event(event: MediaControlEvent) -> Option<MediaCommand> {
 
 fn notify(track: &Track, image: Option<std::path::PathBuf>) {
     // El fallo de una notificación no debe ensuciar la UI: se ignora. La
-    // imagen (carátula) solo la soportan bien los demonios de Linux;
-    // en macOS/Windows el hint se ignora y sale texto, como antes.
+    // imagen (carátula) solo la soportan bien los demonios de Linux: en
+    // notify-rust el método `hint` solo existe en Linux/*BSD (dbus), así
+    // que en macOS/Windows se compila sin hint y sale notificación de texto.
     let mut notification = notify_rust::Notification::new();
     notification
         .appname("ShellMusic")
         .summary(&track.title)
         .body(&track.artist);
+    #[cfg(target_os = "linux")]
     if let Some(path) = image {
         notification.hint(notify_rust::Hint::ImagePath(path.to_string_lossy().into_owned()));
     }
