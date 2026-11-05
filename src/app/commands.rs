@@ -93,6 +93,26 @@ const COMMANDS: &[Command] = &[
         run: radio_off,
     },
     Command {
+        label: "ytm likes",
+        name: "ytm likes",
+        run: ytm_likes,
+    },
+    Command {
+        label: "ytm import <nombre>",
+        name: "ytm import",
+        run: ytm_import,
+    },
+    Command {
+        label: "ytm home",
+        name: "ytm home",
+        run: ytm_home,
+    },
+    Command {
+        label: "ytm radio",
+        name: "ytm radio",
+        run: ytm_radio,
+    },
+    Command {
         label: "stats",
         name: "stats",
         run: stats,
@@ -316,6 +336,108 @@ fn radio_off(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMs
     } else {
         app.message = Some(Message::info("el modo radio ya está desactivado"));
     }
+}
+
+/// Comprueba que YouTube Music esté usable y lanza el comando del bridge en
+/// segundo plano; el resultado llega por `AppMsg::YtmDone`. Devuelve false
+/// (con mensaje accionable) cuando no se puede.
+fn ytm_spawn(
+    app: &mut App,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    op: super::YtmOp,
+    args: &[&str],
+    pending: &str,
+) -> bool {
+    if !app.ytm {
+        app.message = Some(Message::info(
+            "YouTube Music no está activado: alta con «smusic --ytm-auth» y [ytm] enabled = true en config.toml",
+        ));
+        return false;
+    }
+    if !crate::ytm::ready(&app.data_dir) {
+        app.message = Some(Message::info(
+            "faltan los headers de YouTube Music: ejecuta «smusic --ytm-auth»",
+        ));
+        return false;
+    }
+    if app.ytm_busy {
+        app.message = Some(Message::info(
+            "hay otra operación de YouTube Music en curso; espera a que termine",
+        ));
+        return false;
+    }
+    app.ytm_busy = true;
+    app.message = Some(Message::info(pending));
+    let data_dir = app.data_dir.clone();
+    let tx = tx.clone();
+    let owned: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    tokio::spawn(async move {
+        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let result = crate::ytm::run(&data_dir, &refs)
+            .await
+            .map_err(|err| format!("{err:#}"));
+        let _ = tx.send(AppMsg::YtmDone(op, result));
+    });
+    true
+}
+
+/// `ytm likes`: importa los likes de la cuenta como favoritos locales.
+fn ytm_likes(app: &mut App, _: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, _: &str) {
+    ytm_spawn(
+        app,
+        tx,
+        super::YtmOp::Likes,
+        &["likes"],
+        "YouTube Music: descargando likes…",
+    );
+}
+
+/// `ytm import <nombre>`: importa la playlist de la biblioteca cuyo título
+/// contiene <nombre> como playlist local.
+fn ytm_import(app: &mut App, _: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, arg: &str) {
+    let name = arg.trim();
+    if name.is_empty() {
+        app.message = Some(Message::info("uso: ytm import <nombre de la playlist>"));
+        return;
+    }
+    ytm_spawn(
+        app,
+        tx,
+        super::YtmOp::Import(name.to_string()),
+        &["import", name],
+        "YouTube Music: importando playlist…",
+    );
+}
+
+/// `ytm home`: carga el feed Home (recomendaciones de la cuenta) en Resultados.
+fn ytm_home(app: &mut App, _: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, _: &str) {
+    ytm_spawn(
+        app,
+        tx,
+        super::YtmOp::Home,
+        &["home"],
+        "YouTube Music: descargando Home…",
+    );
+}
+
+/// `ytm radio`: radio personalizada (watch playlist) de la pista que suena,
+/// en Resultados. Es la semilla del modo radio de la propia cuenta.
+fn ytm_radio(app: &mut App, _: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<AppMsg>, _: &str) {
+    let Some(track) = app.queue.current_track().cloned() else {
+        app.message = Some(Message::info("nada sonando: la radio personalizada parte de la pista actual"));
+        return;
+    };
+    if track.provider != crate::providers::ProviderKind::Youtube {
+        app.message = Some(Message::info("la radio personalizada solo aplica a pistas de YouTube"));
+        return;
+    }
+    ytm_spawn(
+        app,
+        tx,
+        super::YtmOp::Radio,
+        &["radio", &track.id],
+        "YouTube Music: creando radio personalizada…",
+    );
 }
 
 fn stats(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, _: &str) {

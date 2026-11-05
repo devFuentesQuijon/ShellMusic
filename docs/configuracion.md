@@ -47,6 +47,14 @@ secret = ""              # y autoriza con: smusic --lastfm-auth
 
 [mcp]
 enabled = false         # socket de control local para agentes de IA (cliente de referencia: smusic-mcp)
+
+[sponsorblock]
+enabled = false         # saltar segmentos (sponsor/intro/outro) via sponsor.ajay.app; AVISO: envía el ID de cada vídeo reproducido a ese servidor
+categories = ["sponsor", "intro", "outro"]   # también: interaction, selfpromo, preview, music_offtopic, filler
+
+[ytm]
+enabled = false         # YouTube Music con tu cuenta (pip install ytmusicapi y alta con: smusic --ytm-auth)
+like_writeback = true   # la tecla f también da/quita like en YouTube Music
 ```
 
 - Los proveedores se buscan con yt-dlp (`ytsearch` para YouTube, `scsearch` para SoundCloud); el proveedor activo se muestra en el título de la caja de búsqueda y se cambia en caliente con `m`. Nombres desconocidos en `providers` se ignoran; si la lista queda vacía se usa `["youtube"]`, y si `default_provider` no está en la lista se usa el primero.
@@ -58,6 +66,8 @@ enabled = false         # socket de control local para agentes de IA (cliente de
 - Hay una [colección de temas listos para copiar](temas.md) (incluida una temática de monstruos clásicos para Halloween).
 - El detalle de `[youtube]` (anti-bot) está en [Bloqueo anti-bot de YouTube](anti-bot.md).
 - `[integrations] discord = true` activa la presencia en Discord con el cliente abierto; los usuarios no necesitan crear nada (el Application ID va embebido en el binario). El scrobbling Last.fm (`[lastfm]`) se da de alta con `smusic --lastfm-auth`; detalle y reglas en [Integración con el sistema](integracion-sistema.md).
+- `[sponsorblock] enabled = true` salta automáticamente los segmentos que la comunidad marca en los vídeos (sponsor, intro, outro…); la lista de categorías es configurable (`music_offtopic` corta el parlamento de los sets de DJ). **Privacidad**: cada reproducción de YouTube envía el ID del vídeo a sponsor.ajay.app.
+- `[ytm]` conecta tu cuenta de YouTube Music (recomendaciones, likes, playlists): alta con `pip install ytmusicapi` + `smusic --ytm-auth` + `enabled = true`. Comandos `: ytm likes|import <nombre>|home|radio` y like write-back con la tecla `f`; detalle en [Atajos de teclado](atajos.md).
 
 ## Temas
 

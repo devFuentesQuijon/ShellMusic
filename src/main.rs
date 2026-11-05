@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use shellmusic::app;
 use shellmusic::config::Config;
 use shellmusic::player::mpv::MpvPlayer;
@@ -29,6 +29,9 @@ async fn main() -> Result<()> {
     };
     if flags.lastfm_auth {
         return lastfm_auth().await;
+    }
+    if flags.ytm_auth {
+        return ytm_auth_interactive();
     }
     if !std::io::stdout().is_terminal() {
         fatal(
@@ -170,6 +173,7 @@ Opciones:
   -t, --theme <nombre>   usa un tema empaquetado en lugar del de config.toml
   -p, --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
   --lastfm-auth          autoriza Last.fm interactivamente y guarda la sesión
+  --ytm-auth             guarda los headers de YouTube Music (para [ytm])
   -h, --help             muestra esta ayuda
 
 Comandos headless (sin TTY; requieren smusic en ejecución con [mcp] enabled):
@@ -230,6 +234,7 @@ struct TuiFlags {
     theme: Option<String>,
     play: Option<String>,
     lastfm_auth: bool,
+    ytm_auth: bool,
 }
 
 #[derive(Debug)]
@@ -250,6 +255,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
     let mut theme = None;
     let mut play = None;
     let mut lastfm_auth = false;
+    let mut ytm_auth = false;
     let mut json = false;
     let mut cmd: Option<HeadlessCmd> = None;
     let mut query_parts: Vec<String> = Vec::new();
@@ -269,6 +275,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
                 );
             }
             "--lastfm-auth" => lastfm_auth = true,
+            "--ytm-auth" => ytm_auth = true,
             "--json" => json = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
@@ -290,9 +297,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
         }
     }
     if let Some(cmd) = cmd {
-        if theme.is_some() || play.is_some() || lastfm_auth {
+        if theme.is_some() || play.is_some() || lastfm_auth || ytm_auth {
             return Err(
-                "los subcomandos headless no se combinan con -t/--theme, -p/--play ni --lastfm-auth (arrancan la TUI)"
+                "los subcomandos headless no se combinan con -t/--theme, -p/--play ni --lastfm-auth/--ytm-auth (arrancan la TUI)"
                     .to_string(),
             );
         }
@@ -315,6 +322,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
         theme,
         play,
         lastfm_auth,
+        ytm_auth,
     }))
 }
 
@@ -336,6 +344,63 @@ async fn lastfm_auth() -> Result<()> {
         "Sesión de Last.fm guardada para «{}». Activa el scrobbling con [lastfm] enabled = true en config.toml.",
         session.username
     );
+    Ok(())
+}
+
+/// Alta interactiva en YouTube Music (RF-68): pide los headers del navegador
+/// (lo que copian las herramientas de desarrollo, en JSON o «Nombre: valor»)
+/// y los guarda en el data dir con permisos 0600 para el puente ytmusicapi.
+fn ytm_auth_interactive() -> Result<()> {
+    use std::io::BufRead;
+    if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
+        fatal("smusic --ytm-auth necesita un terminal interactivo.", 1);
+    }
+    let data_dir = dirs::data_dir()
+        .ok_or_else(|| anyhow::anyhow!("no se pudo determinar el directorio de datos"))?
+        .join("shellmusic");
+    std::fs::create_dir_all(&data_dir)?;
+    let path = shellmusic::ytm::headers_path(&data_dir);
+    if path.exists() {
+        println!("Ya hay headers guardados; pegando de nuevo los reemplaza.\n");
+    }
+    println!("Alta en YouTube Music");
+    println!("  1. Abre https://music.youtube.com con tu cuenta.");
+    println!("  2. F12 → Red (Network) → recarga la página.");
+    println!("  3. Clic derecho en la petición «browse» → Copiar → «Copiar cabeceras».");
+    println!("  4. Pega aquí abajo (soporta JSON y «Nombre: valor») y pulsa Enter dos veces.");
+    println!();
+    let mut text = String::new();
+    let stdin = std::io::stdin();
+    let mut saw_blank = false;
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            // Una línea en blanco termina tras contenido; dos seguidas, también.
+            if saw_blank || !text.trim().is_empty() {
+                break;
+            }
+            saw_blank = true;
+            continue;
+        }
+        saw_blank = false;
+        text.push_str(&line);
+        text.push('\n');
+    }
+    // Validación mínima: debe llevar la cookie de la sesión.
+    if !text.to_lowercase().contains("cookie") {
+        fatal(
+            "no se detectó una cookie en lo pegado; copia las cabeceras completas de la petición",
+            2,
+        );
+    }
+    std::fs::write(&path, text.trim_end()).with_context(|| format!("no se pudo escribir {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    println!("Headers guardados en {}.", path.display());
+    println!("Ahora: pip install ytmusicapi y [ytm] enabled = true en config.toml.");
     Ok(())
 }
 
@@ -589,9 +654,20 @@ mod tests {
     fn lastfm_auth_flag() {
         let flags = tui(&["--lastfm-auth"]);
         assert!(flags.lastfm_auth);
+        assert!(!flags.ytm_auth);
         // Combinable con los demás flags.
         let flags = tui(&["-t", "dracula", "--lastfm-auth"]);
         assert!(flags.lastfm_auth);
+        assert_eq!(flags.theme.as_deref(), Some("dracula"));
+    }
+
+    #[test]
+    fn ytm_auth_flag() {
+        let flags = tui(&["--ytm-auth"]);
+        assert!(flags.ytm_auth);
+        assert!(!flags.lastfm_auth);
+        let flags = tui(&["--ytm-auth", "-t", "dracula"]);
+        assert!(flags.ytm_auth);
         assert_eq!(flags.theme.as_deref(), Some("dracula"));
     }
 

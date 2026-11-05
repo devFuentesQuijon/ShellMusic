@@ -21,6 +21,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Portabilidad** (`X`/`I`): exporta e importa playlists y favoritos (JSON/M3U).
 - **Integración con el sistema**: notificaciones de escritorio **con carátula**, MPRIS en Linux (teclas multimedia, widgets, KDE Connect), **presencia en Discord** y **scrobbling Last.fm** (`smusic --lastfm-auth`).
 - **Agentes de IA**: socket de control local opt-in (`[mcp] enabled`) y puente **MCP** (`smusic-mcp`): busca, reproduce y gestiona la cola desde Claude Code y otros agentes ([docs/mcp.md](docs/mcp.md)).
+- **Tu cuenta de YouTube Music** (opt-in, `[ytm]`): importa tus likes y playlists, carga tus recomendaciones (`: ytm home`) y radio personalizada (`: ytm radio`); la tecla `f` también da like en tu cuenta. **SponsorBlock** opt-in salta segmentos sponsor/intro/outro automáticamente.
 - **Temas de color** configurables y **título de pestaña** con la pista en reproducción.
 - **Robusta**: defensas anti-bot de YouTube en cadena (rotación de clientes, cookies, PO Token), auto-respawn de mpv y reintentos ante fallos transitorios.
 - **Interfaz a tu manera**: **ratón** (click en la barra = seek, rueda = volumen), **paleta de comandos** con `:` (`vol 80`, `theme dracula`…) y atajos descubribles con `?`.

@@ -487,6 +487,21 @@ pub struct App {
     /// Petición del socket de control esperando el resultado asíncrono de
     /// su búsqueda (RF-63). Solo puede haber una a la vez.
     pub control_pending: Option<ControlPending>,
+    /// Configuración de SponsorBlock (RF-67), espejo de `[sponsorblock]`.
+    pub sb_enabled: bool,
+    pub sb_categories: Vec<String>,
+    /// Segmentos SponsorBlock aplicables a la pista `sb_for`.
+    pub sb_segments: Vec<crate::sponsorblock::Segment>,
+    pub sb_for: Option<(ProviderKind, String)>,
+    /// Índices de `sb_segments` ya saltados esta sesión (no re-seek ni re-aviso).
+    pub sb_skipped: HashSet<usize>,
+    /// Pista cuyos segmentos ya se pidieron (no repetir el fetch).
+    pub sb_fetched_for: Option<(ProviderKind, String)>,
+    /// Configuración de YouTube Music (RF-68), espejo de `[ytm]`.
+    pub ytm: bool,
+    pub ytm_like_writeback: bool,
+    /// Hay una operación del puente YTM en curso (una a la vez).
+    pub ytm_busy: bool,
 }
 
 impl App {
@@ -636,6 +651,15 @@ impl App {
             stats_dirty: false,
             autoplay_first: false,
             control_pending: None,
+            sb_enabled: config.sponsorblock.enabled,
+            sb_categories: config.sponsorblock.categories.clone(),
+            sb_segments: Vec::new(),
+            sb_for: None,
+            sb_skipped: HashSet::new(),
+            sb_fetched_for: None,
+            ytm: config.ytm.enabled,
+            ytm_like_writeback: config.ytm.like_writeback,
+            ytm_busy: false,
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));

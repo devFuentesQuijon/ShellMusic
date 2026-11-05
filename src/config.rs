@@ -52,6 +52,14 @@ secret = \"\"              # y autoriza con: smusic --lastfm-auth
 
 [mcp]
 enabled = false         # socket de control local para agentes de IA (cliente de referencia: smusic-mcp)
+
+[sponsorblock]
+enabled = false         # saltar segmentos (sponsor/intro/outro) via sponsor.ajay.app; AVISO: envía el ID de cada vídeo reproducido a ese servidor
+categories = [\"sponsor\", \"intro\", \"outro\"]   # también: interaction, selfpromo, preview, music_offtopic, filler
+
+[ytm]
+enabled = false         # YouTube Music con tu cuenta (pip install ytmusicapi y alta con: smusic --ytm-auth)
+like_writeback = true   # la tecla f también da/quita like en YouTube Music
 ";
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -66,6 +74,8 @@ pub struct Config {
     pub integrations: Integrations,
     pub lastfm: Lastfm,
     pub mcp: Mcp,
+    pub sponsorblock: Sponsorblock,
+    pub ytm: Ytm,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -237,6 +247,49 @@ pub struct Mcp {
     pub enabled: bool,
 }
 
+/// Salto automático de segmentos con SponsorBlock (RF-67). Opt-in: envía el
+/// ID de cada vídeo reproducido a sponsor.ajay.app (documentado en el TOML).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Sponsorblock {
+    pub enabled: bool,
+    /// Categorías a saltar: sponsor, intro, outro, interaction, selfpromo,
+    /// preview, music_offtopic, filler.
+    pub categories: Vec<String>,
+}
+
+impl Default for Sponsorblock {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            categories: vec![
+                "sponsor".to_string(),
+                "intro".to_string(),
+                "outro".to_string(),
+            ],
+        }
+    }
+}
+
+/// YouTube Music con cuenta de Google (`[ytm]`, RF-68), vía el puente Python
+/// ytmusicapi (opt-in; alta interactiva con `smusic --ytm-auth`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Ytm {
+    pub enabled: bool,
+    /// La tecla `f` (favoritos) también da/quita like en YouTube Music.
+    pub like_writeback: bool,
+}
+
+impl Default for Ytm {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            like_writeback: true,
+        }
+    }
+}
+
 impl Config {
     pub fn path() -> Result<PathBuf> {
         let base = dirs::config_dir()
@@ -277,6 +330,10 @@ impl Config {
         config.youtube.remote_components = config.youtube.remote_components.trim().to_string();
         config.youtube.pot_provider = config.youtube.pot_provider.trim().to_string();
         config.cache.ttl_minutes = config.cache.ttl_minutes.clamp(1, 120);
+        config
+            .sponsorblock
+            .categories
+            .retain(|category| !category.trim().is_empty());
         Ok(config)
     }
 }

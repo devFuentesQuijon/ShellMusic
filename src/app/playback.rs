@@ -10,9 +10,51 @@ use crate::providers::{MusicProvider, ProviderKind, Track, provider_for_url};
 use crate::queue::{Queue, Removed};
 
 use super::AppMsg;
+use super::YtmOp;
 use super::state::{
     App, ControlAction, Focus, Message, RadioMode, RepeatMode, SleepTimer, UndoAction,
 };
+
+/// Pistas del campo `tracks` de una respuesta del puente YouTube Music.
+fn ytm_tracks(data: &serde_json::Value) -> Vec<Track> {
+    let values = data
+        .get("tracks")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    crate::ytm::parse_tracks(&values)
+}
+
+/// Pide los segmentos SponsorBlock (RF-67) de la pista que arranca: un fetch
+/// por pista, en segundo plano; la respuesta se descarta si para entonces
+/// suena otra cosa.
+fn sponsorblock_fetch(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
+    if !app.sb_enabled {
+        return;
+    }
+    let Some(track) = app.queue.current_track() else {
+        return;
+    };
+    if track.provider != ProviderKind::Youtube {
+        return;
+    }
+    let key = (track.provider, track.id.clone());
+    if app.sb_fetched_for.as_ref() == Some(&key) {
+        return;
+    }
+    app.sb_fetched_for = Some(key.clone());
+    // Hasta que llegue la respuesta no aplican tramos de la pista anterior.
+    app.sb_for = None;
+    let categories = app.sb_categories.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let result = crate::sponsorblock::fetch(&client, &key.1, &categories)
+            .await
+            .map_err(|err| format!("{err:#}"));
+        let _ = tx.send(AppMsg::SponsorBlockDone(key, result));
+    });
+}
 
 /// Libera la petición de control pendiente si una búsqueda más reciente (de
 /// la UI o de otra petición) dejó su epoch obsoleto: el cliente recibe error
@@ -154,6 +196,103 @@ pub(super) fn handle_msg(
             app.consecutive_skips = 0;
             confirm_track_start(app, tx);
             gapless_append_next(app, player, tx);
+            sponsorblock_fetch(app, tx);
+        }
+        AppMsg::SponsorBlockDone(key, Ok(segments)) => {
+            // Solo aplican a la pista que suena: si el usuario cambió entre
+            // medias, la respuesta rezagada se descarta.
+            let current = app
+                .queue
+                .current_track()
+                .map(|t| (t.provider, t.id.clone()));
+            if current.as_ref() == Some(&key) {
+                app.sb_for = Some(key);
+                app.sb_segments = segments;
+                app.sb_skipped.clear();
+            }
+        }
+        // SponsorBlock es lo mejor posible: sin respuesta no se salta nada.
+        AppMsg::SponsorBlockDone(_, Err(_)) => {}
+        AppMsg::YtmDone(op, result) => {
+            app.ytm_busy = false;
+            let label = match &op {
+                YtmOp::Home => "Home de YouTube Music",
+                YtmOp::Radio => "Radio personalizada de YouTube Music",
+                YtmOp::Likes | YtmOp::Import(_) => "",
+            };
+            match (op, result) {
+                (YtmOp::Likes, Ok(data)) => {
+                    let tracks = ytm_tracks(&data);
+                    let total = tracks.len();
+                    let mut added = 0;
+                    for track in tracks {
+                        if app.favorites.add(track) {
+                            added += 1;
+                        }
+                    }
+                    app.save_favorites();
+                    app.message = Some(Message::info(format!(
+                        "YouTube Music: {added} likes importados a favoritos ({total} en total, {} ya estaban)",
+                        total.saturating_sub(added)
+                    )));
+                }
+                (YtmOp::Import(_), Ok(data)) => {
+                    let name = data
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("importada")
+                        .to_string();
+                    let tracks = ytm_tracks(&data);
+                    if tracks.is_empty() {
+                        app.message = Some(Message::error(format!(
+                            "la playlist «{name}» de YouTube Music vino vacía"
+                        )));
+                    } else if app
+                        .playlists
+                        .items
+                        .iter()
+                        .any(|pl| pl.name.eq_ignore_ascii_case(&name))
+                    {
+                        app.message = Some(Message::error(format!(
+                            "ya existe una playlist local «{name}»; bórrala o renómbrala para reimportar"
+                        )));
+                    } else if let Ok(index) = app.playlists.create(&name) {
+                        let count = tracks.len();
+                        for track in tracks {
+                            app.playlists.add_track(index, track);
+                        }
+                        app.save_playlists();
+                        app.message = Some(Message::info(format!(
+                            "playlist «{name}» importada de YouTube Music ({count} pistas)"
+                        )));
+                    }
+                }
+                (YtmOp::Home | YtmOp::Radio, Ok(data)) => {
+                    let tracks = ytm_tracks(&data);
+                    if tracks.is_empty() {
+                        app.message = Some(Message::info(format!("{label}: sin pistas")));
+                    } else {
+                        app.results = tracks;
+                        app.select(0);
+                        app.focus = crate::app::state::Focus::Browsing;
+                        app.message = Some(Message::info(format!(
+                            "{label}: {} pistas en Resultados (Enter suena, a encola)",
+                            app.results.len()
+                        )));
+                    }
+                }
+                (op, Err(err)) => {
+                    let what = match op {
+                        YtmOp::Import(name) => format!("importar «{name}»"),
+                        YtmOp::Likes => "importar los likes".to_string(),
+                        YtmOp::Home => "cargar el Home".to_string(),
+                        YtmOp::Radio => "crear la radio personalizada".to_string(),
+                    };
+                    app.message = Some(Message::error(format!(
+                        "YouTube Music: falló al {what}: {err}"
+                    )));
+                }
+            }
         }
         AppMsg::RadioDone(artist, Ok(tracks), epoch) => {
             // Si el usuario detuvo, reprodujo otra cosa o desactivó la radio
@@ -238,7 +377,8 @@ pub(super) fn toggle_favorite(app: &mut App, track: Option<Track>) {
         app.message = Some(Message::info("nada que marcar como favorito"));
         return;
     };
-    if app.favorites.toggle(&track) {
+    let added = app.favorites.toggle(&track);
+    if added {
         app.message = Some(Message::info(format!(
             "★ añadida a favoritos: {}",
             track.title
@@ -253,6 +393,14 @@ pub(super) fn toggle_favorite(app: &mut App, track: Option<Track>) {
         )));
     }
     app.save_favorites();
+    // YouTube Music (RF-68): el favorito se refleja como like de la cuenta.
+    if track.provider == ProviderKind::Youtube
+        && app.ytm
+        && app.ytm_like_writeback
+        && crate::ytm::ready(&app.data_dir)
+    {
+        crate::ytm::spawn_like(app.data_dir.clone(), track.id.clone(), added);
+    }
 }
 
 pub(super) fn submit_search(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {

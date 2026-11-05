@@ -47,6 +47,23 @@ pub(super) enum AppMsg {
     RadioDone(String, Result<Vec<Track>, String>, u64),
     LyricsDone(Result<crate::lyrics::Lyrics, String>),
     CoverDone(Result<CoverImage, CoverError>),
+    /// Segmentos SponsorBlock (RF-67) de la pista que arrancó; la clave
+    /// descarta respuestas rezagadas si el usuario ya cambió de pista.
+    SponsorBlockDone((ProviderKind, String), Result<Vec<crate::sponsorblock::Segment>, String>),
+    /// Respuesta del puente de YouTube Music (RF-68) para la operación dada.
+    YtmDone(YtmOp, Result<serde_json::Value, String>),
+}
+
+/// Operación del puente YouTube Music cuyo resultado llega en `AppMsg::YtmDone`.
+pub(super) enum YtmOp {
+    /// Importar los likes de la cuenta como favoritos.
+    Likes,
+    /// Importar la playlist de la biblioteca cuyo nombre (parcial) se buscó.
+    Import(String),
+    /// Cargar el feed Home en Resultados.
+    Home,
+    /// Radio personalizada de la pista actual, en Resultados.
+    Radio,
 }
 
 /// Carátula descargada y decodificada, lista para convertir en protocolo.
@@ -199,6 +216,32 @@ pub async fn run(
                 if !player_respawning
                     && let Ok(status) = player.status().await
                 {
+                    // SponsorBlock (RF-67): la posición entra en un tramo
+                    // marcado → seek a su final, una vez por tramo y pista.
+                    let current_key = app
+                        .queue
+                        .current_track()
+                        .map(|t| (t.provider, t.id.clone()));
+                    if app.sb_enabled
+                        && !status.paused
+                        && app.sb_for.is_some()
+                        && app.sb_for == current_key
+                        && let Some(position) = status.position
+                        && let Some(index) = crate::sponsorblock::skip_target(
+                            &app.sb_segments,
+                            position.as_secs_f64(),
+                            &app.sb_skipped,
+                        )
+                    {
+                        app.sb_skipped.insert(index);
+                        let segment = &app.sb_segments[index];
+                        let category = segment.category.clone();
+                        let delta = (segment.end - position.as_secs_f64()) as i32;
+                        playback::seek_by(&mut app, &player, &tx, delta.max(1));
+                        app.message =
+                            Some(Message::info(format!("saltado segmento «{category}» (SponsorBlock)")));
+                        needs_redraw = true;
+                    }
                     // Puntos máximos de escucha para el scrobble de
                     // Last.fm: solo cuando suena (la pausa no cuenta).
                     if !status.paused

@@ -42,7 +42,7 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | g / G | Listas (resultados, cola, favoritos, playlists) | Ir al inicio / al final |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda; en Cola o Favoritos filtra la lista en vivo (Esc suelta el filtro) |
 | / | Favoritos / Contenido de playlist | Filtrar la lista en vivo: escribe y la lista se recorta (título/artista, sin distinguir mayúsculas); Enter opera sobre la lista filtrada, Esc suelta el filtro |
-| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~17 comandos (`pause`, `vol 80`, `theme dracula`, `sleep 15`, `sort title`…) y Enter ejecuta el primero |
+| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~21 comandos (`pause`, `vol 80`, `theme dracula`, `sleep 15`, `sort title`, `ytm home`…) y Enter ejecuta el primero |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
@@ -129,6 +129,31 @@ smusic … --json          respuesta cruda del socket, para scripts
 ```
 
 Salida legible en stdout y códigos de salida: 0 ok, 1 error (con mensaje accionable en stderr; p. ej. arrancar la app o activar `[mcp]`), 2 uso incorrecto. Los subcomandos de búsqueda esperan hasta 30 s; el control directo, 5 s. No se combinan con `-t`/`-p`/`--lastfm-auth` (esos arrancan la TUI).
+
+## SponsorBlock
+
+Opt-in (`[sponsorblock] enabled = true`): al arrancar una pista de YouTube se piden los segmentos marcados por la comunidad (sponsor, intro, outro…) y, al llegar la reproducción a uno, se salta a su final con un aviso en la línea de estado. Oro en mixes largos.
+
+- **Privacidad**: habilitarlo envía el ID de cada vídeo que reproduces a sponsor.ajay.app (terceros), como indica el propio `config.toml`.
+- Categorías en `[sponsorblock] categories` (añade `music_offtopic` para cortar parlamento de sets de DJ).
+- Solo salta si quedan ≥1,5 s de tramo; no molesta con seeks de nada.
+
+## YouTube Music con tu cuenta
+
+Opt-in (`[ytm]`), vía `ytmusicapi` (Python). Alta:
+
+1. `pip install ytmusicapi`
+2. `smusic --ytm-auth` — pega las cabeceras copiadas de la petición «browse» de music.youtube.com (F12 → Red → clic derecho → copiar cabeceras) y Enter dos veces.
+3. `[ytm] enabled = true` en `config.toml`.
+
+Comandos de paleta (`:`):
+
+- `: ytm likes` — importa tus likes de YouTube Music como favoritos (deduplicado; los existentes se respetan).
+- `: ytm import <nombre>` — importa la playlist de tu biblioteca cuyo título contiene `<nombre>` como playlist local (rechaza si ya existe una local homónima).
+- `: ytm home` — tus recomendaciones (feed Home) en Resultados.
+- `: ytm radio` — radio personalizada de la pista que suena (la watch playlist de tu cuenta) en Resultados; excluye la propia semilla.
+
+Con `[ytm] like_writeback = true` (por defecto), la tecla `f` sobre una pista de YouTube también da/quita like en tu cuenta. Los errores de la integración son accionables: cookies caducadas → rehaz `smusic --ytm-auth`; falta la librería → `pip install ytmusicapi`.
 
 ## Overlay de letras
 

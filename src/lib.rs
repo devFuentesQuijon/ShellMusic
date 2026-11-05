@@ -15,11 +15,13 @@ pub mod queue;
 pub mod random;
 pub mod session;
 pub mod smart;
+pub mod sponsorblock;
 pub mod state_file;
 pub mod stats;
 pub mod system;
 pub mod theme;
 pub mod tui;
+pub mod ytm;
 
 /// Edad en días de una versión de yt-dlp (`YYYY.MM.DD`) respecto a hoy.
 /// None si el formato no se reconoce (no se avisa de lo que no se entiende).
