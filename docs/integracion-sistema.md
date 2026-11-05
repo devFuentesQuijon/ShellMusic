@@ -46,6 +46,8 @@ Reglas (las oficiales de Last.fm): la pista debe durar **más de 30 s** y habers
 
 Al cambiar de pista se descarga la carátula de YouTube (la misma que usa el panel «sonando ahora»), se guarda como PNG en el directorio de datos y se adjunta a la notificación con `image-path` de D-Bus. Si la descarga tarda, la notificación espera (~200-400 ms típicos) y sale con la imagen; si falla, sale de texto. No hay configuración extra: sigue el interruptor `notifications`.
 
+Las notificaciones de pista **no se apilan**: cada cambio reemplaza a la anterior (mismo ID de D-Bus) y van marcadas `transient`, así que el demonio no las archiva en el historial — queda como mucho una «sonando ahora» por app, junto a la que genera el escritorio desde MPRIS con los controles. La misma carátula se publica en el metadata MPRIS (`mpris:artUrl`), de modo que la notificación de controles también la muestra.
+
 ## Configuración
 
 Se desactivan por separado en `config.toml`:

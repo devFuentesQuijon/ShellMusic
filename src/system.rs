@@ -41,6 +41,11 @@ pub struct SystemIntegration {
     /// Última pista publicada (para no repetir metadata/notificación).
     last_track: Option<(ProviderKind, String)>,
     last_paused: bool,
+    /// ID de la última notificación «sonando ahora» (Linux): la siguiente la
+    /// reemplaza en su sitio en vez de apilarse; `None` si aún no hay o el
+    /// servidor ya la caducó/cerró.
+    #[cfg(target_os = "linux")]
+    notification_id: Option<u32>,
     /// Aviso de arranque si los media controls no pudieron iniciarse.
     pub startup_warning: Option<String>,
 }
@@ -89,6 +94,7 @@ impl SystemIntegration {
             discord,
             last_track: None,
             last_paused: false,
+            notification_id: None,
             startup_warning: warning.or(discord_warning),
         }
     }
@@ -128,7 +134,7 @@ impl SystemIntegration {
                 if current == Some(pending) && self.notifications
                     && let Some(track) = app.queue.current_track().cloned()
                 {
-                    notify(&track, ready.then(|| app.cover_png_path.clone()));
+                    self.notify(&track, ready.then(|| app.cover_png_path.clone()));
                 }
             }
         }
@@ -182,10 +188,19 @@ impl SystemIntegration {
         if let Some(controls) = &mut self.controls {
             match track {
                 Some(track) => {
+                    // La carátula descargada se publica también en MPRIS: la
+                    // notificación de controles del escritorio la muestra.
+                    let cover_key = (track.provider, track.id.clone());
+                    let cover_url = if app.cover_ready_for.as_ref() == Some(&cover_key) {
+                        Some(format!("file://{}", app.cover_png_path.display()))
+                    } else {
+                        None
+                    };
                     let _ = controls.set_metadata(MediaMetadata {
                         title: Some(&track.title),
                         artist: Some(&track.artist),
                         duration: track.duration.or(app.status.duration),
+                        cover_url: cover_url.as_deref(),
                         ..Default::default()
                     });
                     let progress = app.status.position.map(MediaPosition);
@@ -208,7 +223,7 @@ impl SystemIntegration {
             let cover_key = (track.provider, track.id.clone());
             if app.cover_ready_for.as_ref() == Some(&cover_key) {
                 // Carátula ya en disco: notificación con imagen ya mismo.
-                notify(track, Some(app.cover_png_path.clone()));
+                self.notify(track, Some(app.cover_png_path.clone()));
             } else if track.provider == ProviderKind::Youtube
                 && app.cover_failed_for.as_ref() != Some(&cover_key)
             {
@@ -217,10 +232,62 @@ impl SystemIntegration {
                 app.notify_pending = Some(cover_key);
             } else {
                 // Sin carátula posible (no YouTube o fetch ya fallado): texto.
-                notify(track, None);
+                self.notify(track, None);
             }
         }
     }
+
+    /// Notifica el cambio de pista. En Linux la notificación es transient
+    /// (no se guarda en el historial) y reemplaza a la anterior: queda una
+    /// sola «sonando ahora» en vez de una pila por pista.
+    fn notify(&mut self, track: &Track, image: Option<std::path::PathBuf>) {
+        // El fallo de una notificación no debe ensuciar la UI: se ignora. La
+        // imagen (carátula) solo la soportan bien los demonios de Linux: en
+        // notify-rust el método `hint` solo existe en Linux/*BSD (dbus), así
+        // que en macOS/Windows se compila sin hint y sale notificación de texto.
+        #[cfg(target_os = "linux")]
+        {
+            let notification = track_notification(track, image.as_deref(), self.notification_id);
+            match notification.show() {
+                Ok(handle) => self.notification_id = Some(handle.id()),
+                Err(_) => self.notification_id = None,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let mut notification = notify_rust::Notification::new();
+            notification
+                .appname("ShellMusic")
+                .summary(&track.title)
+                .body(&track.artist);
+            let _ = image; // sin `hint` fuera de Linux no hay carátula: se descarta
+            let _ = notification.show();
+        }
+    }
+}
+
+/// Construye la notificación «sonando ahora» (Linux): transient para que el
+/// demonio no la archive en el historial, carátula si ya está en disco y
+/// reemplazo de la notificación previa para no apilarse.
+#[cfg(target_os = "linux")]
+fn track_notification(
+    track: &Track,
+    image: Option<&std::path::Path>,
+    replace_id: Option<u32>,
+) -> notify_rust::Notification {
+    let mut notification = notify_rust::Notification::new();
+    notification
+        .appname("ShellMusic")
+        .summary(&track.title)
+        .body(&track.artist)
+        .hint(notify_rust::Hint::Transient(true));
+    if let Some(path) = image {
+        notification.hint(notify_rust::Hint::ImagePath(path.to_string_lossy().into_owned()));
+    }
+    if let Some(id) = replace_id {
+        notification.id(id);
+    }
+    notification
 }
 
 /// Traduce un evento de souvlaki a un comando propio (Linux).
@@ -253,25 +320,6 @@ fn map_event(event: MediaControlEvent) -> Option<MediaCommand> {
     }
 }
 
-fn notify(track: &Track, image: Option<std::path::PathBuf>) {
-    // El fallo de una notificación no debe ensuciar la UI: se ignora. La
-    // imagen (carátula) solo la soportan bien los demonios de Linux: en
-    // notify-rust el método `hint` solo existe en Linux/*BSD (dbus), así
-    // que en macOS/Windows se compila sin hint y sale notificación de texto.
-    let mut notification = notify_rust::Notification::new();
-    notification
-        .appname("ShellMusic")
-        .summary(&track.title)
-        .body(&track.artist);
-    #[cfg(target_os = "linux")]
-    if let Some(path) = image {
-        notification.hint(notify_rust::Hint::ImagePath(path.to_string_lossy().into_owned()));
-    }
-    #[cfg(not(target_os = "linux"))]
-    let _ = image; // sin `hint` fuera de Linux no hay carátula: se descarta
-    let _ = notification.show();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,8 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn update_only_acts_on_changes() {
-        // Sin controls (tests corren con media_controls apagado vía config
+    fn update_only_acts_on_changes() {        // Sin controls (tests corren con media_controls apagado vía config
         // por defecto... activo, pero MediaControls sin D-Bus en CI da None):
         // el estado interno se actualiza igualmente.
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -329,5 +376,36 @@ mod tests {
         app.queue.current = None;
         system.update(&mut app);
         assert_eq!(system.last_track, None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn track_notification_is_transient_and_carries_cover() {
+        let track = Track {
+            id: "a".to_string(),
+            title: "título a".to_string(),
+            artist: "artista".to_string(),
+            duration: None,
+            source_url: String::new(),
+            provider: ProviderKind::Youtube,
+        };
+        use notify_rust::Hint;
+
+        // Sin carátula: solo transient (no se archiva en el historial).
+        let notification = super::track_notification(&track, None, Some(42));
+        assert_eq!(notification.summary, "título a");
+        assert_eq!(notification.body, "artista");
+        assert!(notification.hints.contains(&Hint::Transient(true)));
+        assert!(!notification
+            .hints
+            .iter()
+            .any(|h| matches!(h, Hint::ImagePath(_))));
+
+        // Con carátula: hint de imagen con la ruta dada.
+        let notification =
+            super::track_notification(&track, Some(std::path::Path::new("/tmp/cover.png")), None);
+        assert!(notification
+            .hints
+            .contains(&Hint::ImagePath("/tmp/cover.png".into())));
     }
 }
