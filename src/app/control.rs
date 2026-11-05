@@ -50,13 +50,7 @@ pub(super) fn handle(
         "queue_clear" => respond(&mut reply, queue_clear(app, player, tx)),
         "control" => respond(&mut reply, palette(app, player, tx, &body)),
         "radio" => respond(&mut reply, radio(app, player, tx, &body)),
-        "playlists_list" => respond(&mut reply, control::ok(json!(
-            app.playlists
-                .items
-                .iter()
-                .map(|pl| json!({ "name": pl.name, "tracks": pl.tracks.len() }))
-                .collect::<Vec<_>>()
-        ))),
+        "playlists_list" => respond(&mut reply, playlists_list(app)),
         "playlist_play" => respond(&mut reply, playlist_play(app, player, tx, &body)),
         "favorites_list" => respond(&mut reply, control::ok(control::tracks_json(&app.favorites.tracks))),
         other => respond(&mut reply, control::fail(format!("petición desconocida: «{other}»"))),
@@ -226,7 +220,32 @@ fn radio(
     control::ok(json!({ "radio": app.radio, "mode": app.radio_mode.name() }))
 }
 
-/// Sustituye la cola por una playlist y arranca su primera pista.
+/// Listado unificado: playlists inteligentes no vacías (flag `smart`) y
+/// guardadas. Resolución de nombres en `playlist_play`: gana la guardada.
+fn playlists_list(app: &App) -> Value {
+    let mut items: Vec<Value> = crate::smart::SmartKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            let tracks = kind.tracks(&app.stats, &app.favorites);
+            if tracks.is_empty() {
+                None
+            } else {
+                Some(json!({ "name": kind.name(), "tracks": tracks.len(), "smart": true }))
+            }
+        })
+        .collect();
+    items.extend(
+        app.playlists
+            .items
+            .iter()
+            .map(|pl| json!({ "name": pl.name, "tracks": pl.tracks.len(), "smart": false })),
+    );
+    control::ok(Value::Array(items))
+}
+
+/// Sustituye la cola por una playlist y arranca su primera pista. Acepta
+/// playlists guardadas y smart (RF-65): si el nombre coincide con una
+/// guardada, gana esta (los datos del usuario mandan sobre la vista derivada).
 fn playlist_play(
     app: &mut App,
     player: &Arc<dyn Player>,
@@ -236,23 +255,181 @@ fn playlist_play(
     let Some(name) = body.get("name").and_then(Value::as_str).map(str::trim) else {
         return control::fail("falta «name»");
     };
-    let Some(pos) = app
+    let stored = app
         .playlists
         .items
         .iter()
-        .position(|pl| pl.name.eq_ignore_ascii_case(name))
-    else {
-        return control::fail(format!("playlist no encontrada: «{name}»"));
+        .find(|pl| pl.name.eq_ignore_ascii_case(name))
+        .map(|pl| (pl.name.clone(), pl.tracks.clone()));
+    let (label, tracks) = match stored {
+        Some((name, tracks)) => (format!("playlist «{name}»"), tracks),
+        None => match crate::smart::SmartKind::from_name(name) {
+            Some(kind) => {
+                let tracks = kind.tracks(&app.stats, &app.favorites);
+                (format!("playlist inteligente «{}»", kind.name()), tracks)
+            }
+            None => return control::fail(format!("playlist no encontrada: «{name}»")),
+        },
     };
-    let (name, len) = {
-        let pl = &app.playlists.items[pos];
-        if pl.tracks.is_empty() {
-            return control::fail(format!("la playlist «{}» está vacía", pl.name));
-        }
-        app.queue.tracks = pl.tracks.clone();
-        (pl.name.clone(), pl.tracks.len())
-    };
+    if tracks.is_empty() {
+        return control::fail(format!("la {label} está vacía"));
+    }
+    let len = tracks.len();
+    app.queue.tracks = tracks;
     app.queue.current = None;
     playback::play_queue_track(app, player, tx, 0);
-    control::ok(json!({ "message": format!("sonando playlist «{name}» ({len} pistas)") }))
+    control::ok(json!({ "message": format!("sonando {label} ({len} pistas)") }))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use crate::config::Config;
+    use crate::providers::{ProviderKind, Track};
+    use anyhow::Result;
+
+    struct MockPlayer;
+
+    #[async_trait::async_trait]
+    impl Player for MockPlayer {
+        async fn play(&self, _url: &str, _start: Option<std::time::Duration>) -> Result<()> {
+            Ok(())
+        }
+        async fn toggle_pause(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn stop(&self) -> Result<()> {
+            Ok(())
+        }
+        async fn seek(&self, _seconds: i32) -> Result<()> {
+            Ok(())
+        }
+        async fn set_volume(&self, _volume: u8) -> Result<()> {
+            Ok(())
+        }
+        async fn status(&self) -> Result<crate::player::PlaybackStatus> {
+            Ok(crate::player::PlaybackStatus::default())
+        }
+    }
+
+    fn track(id: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            title: format!("título {id}"),
+            artist: "artista".to_string(),
+            duration: None,
+            source_url: format!("https://example.com/{id}"),
+            provider: ProviderKind::Youtube,
+        }
+    }
+
+    fn test_app() -> App {
+        App::with_data_dir(
+            &Config::default(),
+            &std::env::temp_dir().join(format!(
+                "shellmusic-control-test-{}-{:016x}",
+                std::process::id(),
+                crate::state_file::random_suffix()
+            )),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn playlists_list_flags_smart_and_skips_empty() {
+        let mut app = test_app();
+        let pl = app.playlists.create("mix").unwrap();
+        app.playlists.add_track(pl, track("a"));
+
+        // Sin estadísticas no hay smart no vacías: solo la guardada.
+        let data = playlists_list(&app);
+        let items = data["data"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["name"], "mix");
+        assert_eq!(items[0]["smart"], false);
+
+        // Con una reproducción aparece la smart con su flag y conteo.
+        app.stats.record(&track("a"));
+        let items = playlists_list(&app)["data"].as_array().unwrap().clone();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["name"], "Más escuchadas");
+        assert_eq!(items[0]["tracks"], 1);
+        assert_eq!(items[0]["smart"], true);
+        assert_eq!(items[1]["name"], "mix");
+        assert_eq!(items[1]["smart"], false);
+    }
+
+    #[tokio::test]
+    async fn playlist_play_resolves_smart_by_name() {
+        let mut app = test_app();
+        app.stats.record(&track("a"));
+        app.stats.record(&track("b"));
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let response = playlist_play(
+            &mut app,
+            &player,
+            &tx,
+            &json!({ "name": "más escuchadas" }),
+        );
+        assert_eq!(response["ok"], true);
+        assert_eq!(app.queue.tracks.len(), 2, "la cola queda sustituida");
+        assert_eq!(app.queue.current, Some(0), "arranca la primera pista");
+        assert!(
+            response["data"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("playlist inteligente"),
+            "mensaje: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn playlist_play_stored_wins_over_smart_name() {
+        // Una playlist guardada con el nombre de una smart tiene prioridad:
+        // los datos del usuario mandan sobre la vista derivada.
+        let mut app = test_app();
+        let pl = app.playlists.create("Más escuchadas").unwrap();
+        app.playlists.add_track(pl, track("guardada"));
+        app.stats.record(&track("stat"));
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let response = playlist_play(&mut app, &player, &tx, &json!({ "name": "Más Escuchadas" }));
+        assert_eq!(response["ok"], true);
+        assert_eq!(app.queue.tracks.len(), 1);
+        assert_eq!(app.queue.tracks[0].id, "guardada");
+        assert!(
+            !response["data"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("inteligente"),
+            "mensaje: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn playlist_play_unknown_and_empty_fail() {
+        let mut app = test_app();
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        let response = playlist_play(&mut app, &player, &tx, &json!({ "name": "inexistente" }));
+        assert_eq!(response["ok"], false);
+
+        // Smart conocida pero vacía (sin datos de escucha): error accionable.
+        let response = playlist_play(&mut app, &player, &tx, &json!({ "name": "redescubrir" }));
+        assert_eq!(response["ok"], false);
+        assert!(
+            response["error"].as_str().unwrap().contains("vacía"),
+            "error: {response}"
+        );
+
+        let response = playlist_play(&mut app, &player, &tx, &json!({}));
+        assert_eq!(response["ok"], false);
+        assert!(response["error"].as_str().unwrap().contains("name"));
+    }
 }

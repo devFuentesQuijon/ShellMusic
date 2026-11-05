@@ -40,6 +40,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("e", "mover a continuación"),
             ("w", "guardar cola como playlist"),
             ("J / K", "mover abajo / arriba"),
+            ("/", "filtrar la lista en vivo"),
         ],
     ),
     (
@@ -56,6 +57,8 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("→", "autocompletar búsqueda desde el historial"),
             ("o", "buscar pistas del artista de la pista"),
+            ("B", "radio basada en la pista (semilla)"),
+            ("✦", "playlists inteligentes en Playlists (solo lectura)"),
             ("L", "letra de la pista (lrclib.net)"),
             ("i", "panel «sonando ahora» con carátula"),
         ],

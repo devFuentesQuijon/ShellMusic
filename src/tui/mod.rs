@@ -19,7 +19,7 @@ use crate::app::{App, Focus, Overlay};
 
 const HELP_SEARCH: &str = "Enter buscar · Tab panel · Esc resultados · Ctrl+C salir";
 const HELP_RESULTS: &str = "Enter reproducir · a cola · f favorito · o artista · y copiar · ←/→ seek · 0-9 % · l repetir · ? ayuda · q salir";
-const HELP_QUEUE: &str = "Enter reproducir · d eliminar · c ir a actual · J/K mover · y copiar · ←/→ seek · l repetir · ? ayuda · q salir";
+const HELP_QUEUE: &str = "Enter reproducir · d eliminar · c ir a actual · / filtrar · J/K mover · y copiar · ←/→ seek · l repetir · ? ayuda · q salir";
 const HELP_FAVORITES: &str =
     "Enter reproducir · a cola · d/f quitar · y copiar · ←/→ seek · l repetir · ? ayuda · q salir";
 

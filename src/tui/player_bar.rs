@@ -20,6 +20,29 @@ pub(crate) fn sleep_label(timer: Option<SleepTimer>) -> String {
     }
 }
 
+/// Etiqueta «a continuación» para la barra: título de la siguiente pista y
+/// duración restante de la cola (sumando solo pistas con duración conocida).
+/// Vacía cuando la actual es la última o no hay reproducción.
+fn up_next_label(app: &App) -> String {
+    let Some(current) = app.queue.current else {
+        return String::new();
+    };
+    let Some(next) = app.queue.tracks.get(current + 1) else {
+        return String::new();
+    };
+    let rest: std::time::Duration = app.queue.tracks[current + 1..]
+        .iter()
+        .filter_map(|track| track.duration)
+        .sum();
+    let secs = rest.as_secs();
+    format!(
+        "  → {}  +{}:{:02}",
+        truncate(&next.title, 20),
+        secs / 60,
+        secs % 60
+    )
+}
+
 pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     let (ratio, label) = match app.queue.current_track() {
         Some(track) => {
@@ -37,7 +60,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 String::new()
             };
             let meta = format!(
-                "  {}/{}  cola {}/{}  vol:{}{}{}{}",
+                "  {}/{}  cola {}/{}  vol:{}{}{}{}{}",
                 fmt_duration(app.status.position),
                 fmt_duration(app.status.duration.or(track.duration)),
                 position,
@@ -45,7 +68,8 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
                 app.status.volume,
                 app.repeat.bar_label(),
                 radio,
-                sleep_label(app.sleep_timer)
+                sleep_label(app.sleep_timer),
+                up_next_label(app)
             );
             // Los títulos pueden ser larguísimos: se truncan para que los
             // metadatos (progreso, cola, volumen, repetición, radio)

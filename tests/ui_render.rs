@@ -165,12 +165,44 @@ fn playlist_overlay_list_and_content() {
     assert!(screen.contains("prueba (2)"), "entrada con contador:\n{screen}");
     assert!(screen.contains("n nueva"), "hints:\n{screen}");
 
-    app.overlay = Overlay::Content(0);
-    app.overlay_content_select(0, 0);
+    app.overlay = Overlay::Content(shellmusic::app::ContentTarget::Stored(0));
+    app.overlay_content_select(shellmusic::app::ContentTarget::Stored(0), 0);
     let screen = render(&mut app);
     assert!(screen.contains("Playlist: prueba (2)"), "título contenido:\n{screen}");
     assert!(screen.contains("1. Pista A"), "pista 1:\n{screen}");
     assert!(screen.contains("2. Pista B"), "pista 2:\n{screen}");
+}
+
+#[test]
+fn playlist_overlay_shows_smart_entries_with_data() {
+    use shellmusic::app::{ContentTarget, Overlay};
+    let mut app = test_app();
+    let pl = app.playlists.create("prueba").unwrap();
+    app.playlists.add_track(pl, track("a", "Pista A"));
+    // Sin estadísticas no hay inteligentes: solo la guardada.
+    app.overlay = Overlay::List;
+    app.overlay_list_select(0);
+    let screen = render(&mut app);
+    assert!(
+        !screen.contains("Más escuchadas"),
+        "sin smart vacías:\n{screen}"
+    );
+
+    // Con una reproducción registrada aparece «Más escuchadas» la primera.
+    app.stats.record(&track("a", "Pista A"));
+    app.overlay_list_select(0);
+    let screen = render(&mut app);
+    assert!(screen.contains("✦ Más escuchadas (1)"), "entrada smart:\n{screen}");
+    assert!(screen.contains("prueba (1)"), "guardada tras la smart:\n{screen}");
+
+    // El contenido smart usa el título con ✦ y el aviso de solo lectura.
+    app.smart_tracks = shellmusic::smart::SmartKind::Top.tracks(&app.stats, &app.favorites);
+    app.overlay = Overlay::Content(ContentTarget::Smart(shellmusic::smart::SmartKind::Top));
+    app.overlay_content_select(ContentTarget::Smart(shellmusic::smart::SmartKind::Top), 0);
+    let screen = render(&mut app);
+    assert!(screen.contains("✦ Más escuchadas (1)"), "título contenido smart:\n{screen}");
+    assert!(screen.contains("1. Pista A"), "pista smart:\n{screen}");
+    assert!(screen.contains("solo lectura"), "hints smart:\n{screen}");
 }
 
 #[test]

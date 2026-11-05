@@ -98,6 +98,28 @@ pub(super) fn handle_msg(
             }
         }
         AppMsg::Error(err) => app.message = Some(Message::error(err)),
+        AppMsg::PlayFailed { track, error } => {
+            // La pista que falló ya no es la actual (el usuario cambió entre
+            // medias): el aviso queda obsoleto, solo se muestra el error.
+            let still_current = app
+                .queue
+                .current_track()
+                .is_some_and(|t| (t.provider, t.id.clone()) == track);
+            if !still_current {
+                app.message = Some(Message::error(error));
+            } else if app.consecutive_skips < MAX_AUTO_SKIPS
+                && let Some(next) = app.queue.next_index()
+            {
+                // Pista caída: se avisa y se pasa a la siguiente. La guarda
+                // frena el bucle si el fallo es del servicio, no de la pista.
+                app.consecutive_skips += 1;
+                app.message = Some(Message::error(format!("{error}; pasando a la siguiente…")));
+                app.mpv_appended = None;
+                play_queue_track(app, player, tx, next);
+            } else {
+                app.message = Some(Message::error(error));
+            }
+        }
         AppMsg::LyricsDone(result) => match result {
             Ok(lyrics) => {
                 app.lyrics_synced = lyrics.synced;
@@ -128,6 +150,8 @@ pub(super) fn handle_msg(
             if app.message.as_ref().is_some_and(|m| !m.is_error) {
                 app.message = None;
             }
+            // La pista arrancó: la racha de autoskips se reinicia.
+            app.consecutive_skips = 0;
             confirm_track_start(app, tx);
             gapless_append_next(app, player, tx);
         }
@@ -331,7 +355,8 @@ pub(super) fn play_queue_track_from(
     // era una escritura síncrona a disco en la ruta caliente.
     app.stats.record(&app.queue.tracks[index]);
     app.stats_dirty = true;
-    app.queue_select(index);
+    // La selección de la cola vive en coordenadas visibles (filtro `/`).
+    app.queue_select_real(index);
     app.message = Some(Message::info(format!(
         "cargando «{}»…",
         app.queue.tracks[index].title
@@ -342,6 +367,7 @@ pub(super) fn play_queue_track_from(
     // pide siempre al cambiar de pista, no solo al abrir el panel «i».
     request_cover(app, tx);
     let url = app.queue.tracks[index].source_url.clone();
+    let failed_key = (app.queue.tracks[index].provider, app.queue.tracks[index].id.clone());
     let player = Arc::clone(player);
     let play_tx = tx.clone();
     tokio::spawn(async move {
@@ -350,7 +376,10 @@ pub(super) fn play_queue_track_from(
                 let _ = play_tx.send(AppMsg::PlaybackStarted);
             }
             Err(err) => {
-                let _ = play_tx.send(AppMsg::Error(format!("no se pudo reproducir: {err}")));
+                let _ = play_tx.send(AppMsg::PlayFailed {
+                    track: failed_key,
+                    error: format!("no se pudo reproducir: {err}"),
+                });
             }
         }
     });
@@ -451,7 +480,8 @@ fn gapless_advance(app: &mut App, index: usize) {
     ));
     app.stats.record(&app.queue.tracks[index]);
     app.stats_dirty = true;
-    app.queue_select(index);
+    // La selección de la cola vive en coordenadas visibles (filtro `/`).
+    app.queue_select_real(index);
     // Gapless: mpv ya la está reproduciendo, el inicio es ahora mismo.
     app.playing = Some((
         app.queue.tracks[index].clone(),
@@ -629,6 +659,7 @@ pub(super) fn stop_playback(
     app.queue.current = None;
     app.radio_epoch += 1;
     app.playback_active = false;
+    app.consecutive_skips = 0;
     app.mpv_appended = None;
     app.playing = None;
     app.playing_peak = Duration::ZERO;
@@ -639,6 +670,9 @@ pub(super) fn stop_playback(
 
 const RADIO_TRACKS: usize = 5;
 const RAREZAS_SKIP_HITS: usize = 15;
+/// Tope de saltos automáticos consecutivos por pista caída: más allá, el
+/// fallo parece del servicio y es mejor quedarse con el error a mano.
+const MAX_AUTO_SKIPS: u8 = 3;
 
 /// Palabras clave para el modo random por género/década.
 const RANDOM_GENERO_KEYWORDS: &[&str] = &[
@@ -667,22 +701,33 @@ pub(super) fn radio_prefetch(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) 
     if !app.radio || app.repeat != RepeatMode::Off {
         return;
     }
-    let Some(current) = app.queue.current_track() else {
+    // Con semilla (tecla B) la guarda se fija sobre ella en vez de sobre la
+    // pista actual: la expansión consumirá la semilla.
+    let Some(current) = app
+        .radio_seed
+        .as_ref()
+        .map(|track| (track.provider, track.id.clone()))
+        .or_else(|| app.queue.current_track().map(|t| (t.provider, t.id.clone())))
+    else {
         return;
     };
     if app.queue.next_index().is_some() {
         return;
     }
-    let id = (current.provider, current.id.clone());
-    if app.radio_expanded_for.as_ref() == Some(&id) {
+    if app.radio_expanded_for.as_ref() == Some(&current) {
         return;
     }
-    app.radio_expanded_for = Some(id);
+    app.radio_expanded_for = Some(current);
     radio_expand(app, tx);
 }
 
 fn radio_expand(app: &mut App, tx: &mpsc::UnboundedSender<AppMsg>) {
-    let Some(track) = app.queue.current_track().cloned() else {
+    // La semilla one-shot manda sobre la pista actual; se consume aquí.
+    let Some(track) = app
+        .radio_seed
+        .take()
+        .or_else(|| app.queue.current_track().cloned())
+    else {
         return;
     };
     let Some((_, provider)) = app.providers.get(app.active_provider).cloned() else {
@@ -893,7 +938,11 @@ pub(super) fn remove_from_queue(
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) {
-    let Some(index) = app.queue_selected() else {
+    // La selección es visible (filtro `/`): se opera sobre el índice real.
+    let Some(visible) = app.queue_selected() else {
+        return;
+    };
+    let Some(index) = app.queue_real_index(visible) else {
         return;
     };
     let removed_track = app.queue.tracks.get(index).cloned();
@@ -922,7 +971,9 @@ pub(super) fn remove_from_queue(
     if app.queue.is_empty() {
         app.queue_state.select(None);
     } else {
-        app.queue_select(index);
+        // Reseleccionar lo que ocupó ese hueco (en coordenadas visibles).
+        let successor = index.min(app.queue.len() - 1);
+        app.queue_select_real(successor);
     }
 }
 
@@ -940,7 +991,7 @@ pub(super) fn undo_last(app: &mut App) {
             {
                 app.queue.current = Some(current + 1);
             }
-            app.queue_select(index);
+            app.queue_select_real(index);
             app.message = Some(Message::info(format!(
                 "deshacer: «{}» vuelve a la cola",
                 track.title
@@ -1675,5 +1726,90 @@ mod tests {
         undo_last(&mut app);
         let ids: Vec<&str> = app.favorites.tracks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["a", "b", "c"], "recuperada en su posición");
+    }
+
+    fn fail_msg(id: &str) -> AppMsg {
+        AppMsg::PlayFailed {
+            track: (ProviderKind::Youtube, id.to_string()),
+            error: "no se pudo reproducir".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn play_failed_skips_to_next_with_guard() {
+        let mut app = app_with_tracks("autoskip", &["a", "b", "c", "d"]);
+        app.queue.current = Some(0);
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // Tres fallos seguidos: pasa a la siguiente cada vez.
+        for (failed, expected_current) in [("a", 1), ("b", 2), ("c", 3)] {
+            handle_msg(&mut app, fail_msg(failed), &player, &tx);
+            assert_eq!(app.queue.current, Some(expected_current));
+        }
+        assert_eq!(app.consecutive_skips, 3);
+
+        // El cuarto fallo no salta más: la guarda asume caída del servicio.
+        handle_msg(&mut app, fail_msg("d"), &player, &tx);
+        assert_eq!(app.queue.current, Some(3), "no avanza más");
+        assert!(
+            app.message.as_ref().is_some_and(|m| m.is_error),
+            "queda el error a mano"
+        );
+    }
+
+    #[tokio::test]
+    async fn play_failed_from_stale_track_only_shows_error() {
+        let mut app = app_with_tracks("autoskip-stale", &["a", "b"]);
+        app.queue.current = Some(0);
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // El fallo llega de una pista que ya no es la actual (el usuario
+        // cambió entre medias): no se toca la reproducción.
+        handle_msg(&mut app, fail_msg("otra"), &player, &tx);
+        assert_eq!(app.queue.current, Some(0));
+        assert_eq!(app.consecutive_skips, 0);
+    }
+
+    #[tokio::test]
+    async fn playback_started_resets_skip_streak() {
+        let mut app = app_with_tracks("autoskip-reset", &["a", "b"]);
+        app.queue.current = Some(0);
+        app.consecutive_skips = 2;
+        let player: Arc<dyn Player> = Arc::new(MockPlayer);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        handle_msg(&mut app, AppMsg::PlaybackStarted, &player, &tx);
+        assert_eq!(app.consecutive_skips, 0, "arranque confirmado: racha a cero");
+    }
+
+    #[tokio::test]
+    async fn radio_seed_is_consumed_by_prefetch_and_cleared_by_toggle_off() {
+        let mut app = app_with_provider("radio-seed");
+        app.radio = true;
+        app.repeat = RepeatMode::Off;
+        app.radio_mode = RadioMode::Artista;
+        app.queue.add(track("a"));
+        app.queue.current = Some(0);
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // Semilla apuntando a otra pista: la guarda de expansión se fija en
+        // la semilla y la expansión la consume al arrancar.
+        app.radio_seed = Some(track("semilla"));
+        radio_prefetch(&mut app, &tx);
+        assert_eq!(
+            app.radio_expanded_for,
+            Some((ProviderKind::Youtube, "semilla".to_string())),
+            "la guarda vigila la semilla, no la actual"
+        );
+        assert!(app.radio_seed.is_none(), "one-shot: consumida al expandir");
+
+        // Apagar la radio descarta semillas pendientes.
+        let mut app = app_with_provider("radio-seed-off");
+        app.radio = true;
+        app.radio_seed = Some(track("semilla"));
+        app.toggle_radio();
+        assert!(app.radio_seed.is_none());
     }
 }

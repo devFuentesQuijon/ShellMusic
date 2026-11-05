@@ -20,7 +20,14 @@ async fn main() -> Result<()> {
         Ok(cli) => cli,
         Err(err) => fatal(&format!("{err}\n\n{USAGE}"), 2),
     };
-    if cli.lastfm_auth {
+    // Los subcomandos headless hablan con la instancia en ejecución: salen
+    // antes del chequeo de TTY y de dependencias (el cliente no necesita ni
+    // terminal ni mpv local).
+    let flags = match cli {
+        Cli::Headless { cmd, query, json } => return run_headless(cmd, &query, json).await,
+        Cli::Tui(flags) => flags,
+    };
+    if flags.lastfm_auth {
         return lastfm_auth().await;
     }
     if !std::io::stdout().is_terminal() {
@@ -36,7 +43,7 @@ async fn main() -> Result<()> {
     };
     let ytdlp_stale = ytdlp_staleness_warning(&ytdlp_version);
     let mut config = Config::load()?;
-    if let Some(name) = &cli.theme {
+    if let Some(name) = &flags.theme {
         match shellmusic::theme::find_preset(name) {
             Some(preset) => config.theme = preset.clone(),
             None => {
@@ -94,7 +101,7 @@ async fn main() -> Result<()> {
         picker,
         app::Startup {
             warning: ytdlp_stale,
-            play: cli.play,
+            play: flags.play,
         },
     )
     .await;
@@ -157,19 +164,82 @@ fn attached_processes() -> u32 {
 }
 
 const USAGE: &str = "Uso: smusic [-t <nombre>] [-p <búsqueda>] [--lastfm-auth]
+       smusic <comando> [búsqueda...] [--json]
 
 Opciones:
   -t, --theme <nombre>   usa un tema empaquetado en lugar del de config.toml
   -p, --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
   --lastfm-auth          autoriza Last.fm interactivamente y guarda la sesión
-  -h, --help             muestra esta ayuda";
+  -h, --help             muestra esta ayuda
 
+Comandos headless (sin TTY; requieren smusic en ejecución con [mcp] enabled):
+  play <búsqueda>        reproduce la primera coincidencia
+  add <búsqueda>         añade la primera coincidencia a la cola
+  status                 línea compacta de lo que suena
+  pause | next | prev | stop
+  --json                 salida JSON cruda del socket (para scripts)";
+
+/// Subcomando headless (RF-66): controla la instancia en ejecución por el
+/// socket de control, sin abrir la TUI ni necesitar TTY.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeadlessCmd {
+    Play,
+    Add,
+    Status,
+    Pause,
+    Next,
+    Prev,
+    Stop,
+}
+
+impl HeadlessCmd {
+    fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "play" => Self::Play,
+            "add" => Self::Add,
+            "status" => Self::Status,
+            "pause" => Self::Pause,
+            "next" => Self::Next,
+            "prev" => Self::Prev,
+            "stop" => Self::Stop,
+            _ => return None,
+        })
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Add => "add",
+            Self::Status => "status",
+            Self::Pause => "pause",
+            Self::Next => "next",
+            Self::Prev => "prev",
+            Self::Stop => "stop",
+        }
+    }
+
+    /// Los que llevan búsqueda necesitan argumentos posicionales.
+    fn needs_query(self) -> bool {
+        matches!(self, Self::Play | Self::Add)
+    }
+}
+
+/// Flags de la modalidad TUI (arranque de la interfaz).
 #[derive(Debug)]
-struct Cli {
+struct TuiFlags {
     theme: Option<String>,
     play: Option<String>,
     lastfm_auth: bool,
-    help: bool,
+}
+
+#[derive(Debug)]
+enum Cli {
+    Tui(TuiFlags),
+    Headless {
+        cmd: HeadlessCmd,
+        query: String,
+        json: bool,
+    },
 }
 
 fn parse_args() -> std::result::Result<Cli, String> {
@@ -177,37 +247,75 @@ fn parse_args() -> std::result::Result<Cli, String> {
 }
 
 fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cli, String> {
-    let mut cli = Cli {
-        theme: None,
-        play: None,
-        lastfm_auth: false,
-        help: false,
-    };
+    let mut theme = None;
+    let mut play = None;
+    let mut lastfm_auth = false;
+    let mut json = false;
+    let mut cmd: Option<HeadlessCmd> = None;
+    let mut query_parts: Vec<String> = Vec::new();
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-t" | "--theme" => {
-                cli.theme = Some(
+                theme = Some(
                     args.next()
                         .ok_or_else(|| "-t/--theme necesita un nombre de tema".to_string())?,
                 );
             }
             "-p" | "--play" => {
-                cli.play = Some(
+                play = Some(
                     args.next()
                         .ok_or_else(|| "-p/--play necesita un texto de búsqueda".to_string())?,
                 );
             }
-            "--lastfm-auth" => cli.lastfm_auth = true,
-            "-h" | "--help" => cli.help = true,
-            other => return Err(format!("argumento desconocido: {other}")),
+            "--lastfm-auth" => lastfm_auth = true,
+            "--json" => json = true,
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                std::process::exit(0);
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("argumento desconocido: {other}"));
+            }
+            other => {
+                if cmd.is_none() {
+                    cmd = Some(
+                        HeadlessCmd::from_name(other)
+                            .ok_or_else(|| format!("comando desconocido: «{other}»"))?,
+                    );
+                } else {
+                    query_parts.push(other.to_string());
+                }
+            }
         }
     }
-    if cli.help {
-        println!("{USAGE}");
-        std::process::exit(0);
+    if let Some(cmd) = cmd {
+        if theme.is_some() || play.is_some() || lastfm_auth {
+            return Err(
+                "los subcomandos headless no se combinan con -t/--theme, -p/--play ni --lastfm-auth (arrancan la TUI)"
+                    .to_string(),
+            );
+        }
+        let query = query_parts.join(" ");
+        if cmd.needs_query() && query.is_empty() {
+            return Err(format!("«smusic {}» necesita un texto de búsqueda", cmd.name()));
+        }
+        if !cmd.needs_query() && !query_parts.is_empty() {
+            return Err(format!("«smusic {}» no acepta argumentos", cmd.name()));
+        }
+        return Ok(Cli::Headless { cmd, query, json });
     }
-    Ok(cli)
+    if json {
+        return Err(
+            "«--json» solo aplica a los subcomandos headless (play, add, status, pause, next, prev, stop)"
+                .to_string(),
+        );
+    }
+    Ok(Cli::Tui(TuiFlags {
+        theme,
+        play,
+        lastfm_auth,
+    }))
 }
 
 /// Alta interactiva en Last.fm: pide la sesión y la guarda en el
@@ -229,6 +337,111 @@ async fn lastfm_auth() -> Result<()> {
         session.username
     );
     Ok(())
+}
+
+/// Timeout de las peticiones headless que implican búsqueda: resolver y
+/// cargar la primera coincidencia puede llevar varios segundos.
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// Timeout de las peticiones headless de control directo.
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Ejecuta un subcomando headless (RF-66) contra la instancia en ejecución:
+/// traduce a una petición del socket de control, imprime la respuesta y sale
+/// con código 0 (ok) o 1 (error de la app o de conexión).
+async fn run_headless(cmd: HeadlessCmd, query: &str, json: bool) -> Result<()> {
+    use serde_json::{Value, json};
+    let body = match cmd {
+        HeadlessCmd::Play => json!({ "req": "play", "query": query }),
+        HeadlessCmd::Add => json!({ "req": "queue_add", "query": query }),
+        HeadlessCmd::Status => json!({ "req": "now_playing" }),
+        HeadlessCmd::Pause => json!({ "req": "control", "command": "pause" }),
+        HeadlessCmd::Next => json!({ "req": "control", "command": "next" }),
+        HeadlessCmd::Prev => json!({ "req": "control", "command": "prev" }),
+        HeadlessCmd::Stop => json!({ "req": "control", "command": "stop" }),
+    };
+    let timeout = if cmd.needs_query() {
+        SEARCH_TIMEOUT
+    } else {
+        CONTROL_TIMEOUT
+    };
+    let response = match tokio::time::timeout(timeout, shellmusic::control::request(body)).await {
+        Ok(Ok(response)) => response,
+        // El error ya explica la causa accionable (p. ej. activar [mcp]).
+        Ok(Err(err)) => fatal(&format!("{err:#}"), 1),
+        Err(_) => fatal(
+            "tiempo de espera agotado esperando respuesta de la instancia de smusic",
+            1,
+        ),
+    };
+    let ok = response.get("ok").and_then(Value::as_bool) == Some(true);
+    if json {
+        println!("{}", serde_json::to_string(&response).unwrap_or_default());
+    } else if ok {
+        println!("{}", human_line(cmd, &response));
+    }
+    if !ok {
+        let error = response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("error desconocido de la instancia");
+        fatal(error, 1);
+    }
+    Ok(())
+}
+
+/// Salida legible de un subcomando headless (con `--json` va el JSON crudo).
+fn human_line(cmd: HeadlessCmd, response: &serde_json::Value) -> String {
+    let data = &response["data"];
+    match cmd {
+        HeadlessCmd::Status => status_line(data),
+        HeadlessCmd::Play => track_line("♪ sonando", &data["playing"]),
+        HeadlessCmd::Add => track_line("+ en cola", &data["queued"]),
+        HeadlessCmd::Pause | HeadlessCmd::Next | HeadlessCmd::Prev | HeadlessCmd::Stop => data
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("hecho")
+            .to_string(),
+    }
+}
+
+/// «♪ Título — Artista (m:ss/m:ss)»; «⏸ …» en pausa; «nada sonando» si la
+/// cola está vacía.
+fn status_line(data: &serde_json::Value) -> String {
+    use serde_json::Value;
+    let Some(track) = data.get("track").filter(|t| !t.is_null()) else {
+        return "nada sonando".to_string();
+    };
+    let title = track.get("title").and_then(Value::as_str).unwrap_or("?");
+    let artist = track.get("artist").and_then(Value::as_str).unwrap_or("?");
+    let clock = match (
+        data.get("position_secs").and_then(Value::as_u64),
+        data.get("duration_secs").and_then(Value::as_u64),
+    ) {
+        (Some(pos), Some(dur)) => format!(" ({}/{})", fmt_clock(pos), fmt_clock(dur)),
+        _ => String::new(),
+    };
+    let state = if data.get("paused").and_then(Value::as_bool) == Some(true) {
+        "⏸ "
+    } else {
+        "♪ "
+    };
+    format!("{state}{title} — {artist}{clock}")
+}
+
+fn track_line(prefix: &str, track: &serde_json::Value) -> String {
+    let title = track
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    let artist = track
+        .get("artist")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("?");
+    format!("{prefix}: {title} — {artist}")
+}
+
+fn fmt_clock(secs: u64) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
 }
 
 fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>)> {
@@ -321,34 +534,41 @@ mod tests {
         tokens.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_iter()
     }
 
+    /// Parsea en modo TUI; falla el test si el parseo dio headless.
+    fn tui(tokens: &[&str]) -> TuiFlags {
+        match parse_args_from(args(tokens)).unwrap() {
+            Cli::Tui(flags) => flags,
+            Cli::Headless { .. } => panic!("se esperaba modo TUI para {tokens:?}"),
+        }
+    }
+
     #[test]
     fn tema_largo_y_corto() {
         for flag in ["--theme", "-t"] {
-            let cli = parse_args_from(args(&[flag, "dracula"])).unwrap();
-            assert_eq!(cli.theme.as_deref(), Some("dracula"));
-            assert!(!cli.help);
+            let flags = tui(&[flag, "dracula"]);
+            assert_eq!(flags.theme.as_deref(), Some("dracula"));
         }
     }
 
     #[test]
     fn play_largo_y_corto() {
         for flag in ["--play", "-p"] {
-            let cli = parse_args_from(args(&[flag, "daft punk"])).unwrap();
-            assert_eq!(cli.play.as_deref(), Some("daft punk"));
+            let flags = tui(&[flag, "daft punk"]);
+            assert_eq!(flags.play.as_deref(), Some("daft punk"));
         }
     }
 
     #[test]
     fn combinados() {
-        let cli = parse_args_from(args(&["-t", "thriller", "--play", "thriller"])).unwrap();
-        assert_eq!(cli.theme.as_deref(), Some("thriller"));
-        assert_eq!(cli.play.as_deref(), Some("thriller"));
+        let flags = tui(&["-t", "thriller", "--play", "thriller"]);
+        assert_eq!(flags.theme.as_deref(), Some("thriller"));
+        assert_eq!(flags.play.as_deref(), Some("thriller"));
     }
 
     #[test]
     fn sin_argumentos() {
-        let cli = parse_args_from(args(&[])).unwrap();
-        assert!(cli.theme.is_none() && cli.play.is_none() && !cli.help);
+        let flags = tui(&[]);
+        assert!(flags.theme.is_none() && flags.play.is_none() && !flags.lastfm_auth);
     }
 
     #[test]
@@ -367,13 +587,88 @@ mod tests {
 
     #[test]
     fn lastfm_auth_flag() {
-        let cli = parse_args_from(args(&["--lastfm-auth"])).unwrap();
-        assert!(cli.lastfm_auth);
-        assert!(!cli.help);
+        let flags = tui(&["--lastfm-auth"]);
+        assert!(flags.lastfm_auth);
         // Combinable con los demás flags.
-        let cli = parse_args_from(args(&["-t", "dracula", "--lastfm-auth"])).unwrap();
-        assert!(cli.lastfm_auth);
-        assert_eq!(cli.theme.as_deref(), Some("dracula"));
+        let flags = tui(&["-t", "dracula", "--lastfm-auth"]);
+        assert!(flags.lastfm_auth);
+        assert_eq!(flags.theme.as_deref(), Some("dracula"));
+    }
+
+    #[test]
+    fn headless_play_junta_la_busqueda() {
+        let Cli::Headless { cmd, query, json } =
+            parse_args_from(args(&["play", "daft", "punk"])).unwrap()
+        else {
+            panic!("se esperaba modo headless");
+        };
+        assert_eq!(cmd, HeadlessCmd::Play);
+        assert_eq!(query, "daft punk");
+        assert!(!json);
+    }
+
+    #[test]
+    fn headless_json_en_cualquier_posicion() {
+        for tokens in [&["add", "daft", "--json"][..], &["--json", "add", "daft"][..]] {
+            let Cli::Headless { cmd, query, json } =
+                parse_args_from(args(tokens)).unwrap()
+            else {
+                panic!("se esperaba modo headless para {tokens:?}");
+            };
+            assert_eq!(cmd, HeadlessCmd::Add);
+            assert_eq!(query, "daft");
+            assert!(json);
+        }
+    }
+
+    #[test]
+    fn headless_status_y_control_no_llevan_busqueda() {
+        for sub in ["status", "pause", "next", "prev", "stop"] {
+            let Cli::Headless { cmd, query, .. } =
+                parse_args_from(args(&[sub])).unwrap()
+            else {
+                panic!("se esperaba modo headless para {sub}");
+            };
+            assert_eq!(cmd, HeadlessCmd::from_name(sub).unwrap());
+            assert!(query.is_empty());
+        }
+    }
+
+    #[test]
+    fn headless_control_rechaza_argumentos_extra() {
+        for sub in ["status", "pause", "next", "prev", "stop"] {
+            let err = parse_args_from(args(&[sub, "extra"])).unwrap_err();
+            assert!(err.contains("no acepta argumentos"), "error para {sub}: {err}");
+        }
+    }
+
+    #[test]
+    fn headless_play_sin_busqueda_error() {
+        for sub in ["play", "add"] {
+            let err = parse_args_from(args(&[sub])).unwrap_err();
+            assert!(
+                err.contains("necesita un texto de búsqueda"),
+                "error para {sub}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn headless_no_combina_con_flags_de_tui() {
+        let err = parse_args_from(args(&["-p", "x", "play", "y"])).unwrap_err();
+        assert!(err.contains("no se combinan"), "error: {err}");
+    }
+
+    #[test]
+    fn json_sin_subcomando_error() {
+        let err = parse_args_from(args(&["--json"])).unwrap_err();
+        assert!(err.contains("solo aplica"), "error: {err}");
+    }
+
+    #[test]
+    fn comando_desconocido_error() {
+        let err = parse_args_from(args(&["ply", "daft"])).unwrap_err();
+        assert!(err.contains("comando desconocido"), "error: {err}");
     }
 
     #[test]

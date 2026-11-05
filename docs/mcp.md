@@ -51,8 +51,8 @@ lo instala también (es el segundo binario del paquete).
 | `queue_clear` | Vacía la cola y detiene la reproducción. |
 | `control` | Ejecuta un comando de la paleta (`:`): `pause`, `stop`, `next`, `prev`, `vol up`, `vol down`, `vol 80`, `theme dracula`, `radio on`, `radio off`, `stats`, `playlists`, `help`, `quit`. |
 | `radio` | Activa/desactiva (`enabled`) el modo radio. |
-| `playlists_list` | Lista las playlists locales con su número de pistas. |
-| `playlist_play` | Sustituye la cola por la playlist (`name`) y reproduce su primera pista. |
+| `playlists_list` | Lista las playlists —locales e inteligentes (`✦`: «Más escuchadas», «Sin estrenar», «Redescubrir»)— con su número de pistas y el flag `smart`. |
+| `playlist_play` | Sustituye la cola por la playlist (`name`) y reproduce su primera pista. Acepta nombres de playlists inteligentes (gana una local homónima). |
 | `favorites_list` | La lista de favoritos. |
 
 Los resultados llegan como texto JSON compacto (campo `data` del protocolo de

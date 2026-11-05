@@ -22,8 +22,8 @@ mod playback;
 mod state;
 
 pub use state::{
-    App, FilterState, Focus, Message, NameContext, Overlay, PanelAreas, PathAction, RadioMode,
-    RepeatMode, SleepTimer, StatsView, UndoAction,
+    App, ContentTarget, FilterState, Focus, Message, NameContext, Overlay, PanelAreas, PathAction,
+    RadioMode, RepeatMode, SleepTimer, StatsView, UndoAction,
 };
 
 use input::{handle_key, handle_mouse};
@@ -40,6 +40,9 @@ const APP_TITLE: &str = "ShellMusic";
 pub(super) enum AppMsg {
     SearchDone(u64, Result<Vec<Track>, String>),
     Error(String),
+    /// La carga de una pista de la cola falló; `track` es su clave para
+    /// descartar avisos rezagados si el usuario ya cambió de pista.
+    PlayFailed { track: (ProviderKind, String), error: String },
     PlaybackStarted,
     RadioDone(String, Result<Vec<Track>, String>, u64),
     LyricsDone(Result<crate::lyrics::Lyrics, String>),
@@ -146,7 +149,6 @@ pub async fn run(
         }
         play_queue_track_from(&mut app, &player, &tx, current, start);
     }
-
     // Primer frame inmediato; después, redraw perezoso: solo se repinta
     // cuando algo cambia. El tick repinta solo si el estado del player
     // difiere del último frame dibujado, así la app en pausa no renderiza.

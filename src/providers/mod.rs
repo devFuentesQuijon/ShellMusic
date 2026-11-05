@@ -85,6 +85,22 @@ pub(crate) fn track_key(track: &Track) -> (ProviderKind, String) {
     (track.provider, track.id.clone())
 }
 
+/// Orden por título (artista como desempate), insensible a mayúsculas.
+pub(crate) fn cmp_by_title(a: &Track, b: &Track) -> std::cmp::Ordering {
+    a.title
+        .to_lowercase()
+        .cmp(&b.title.to_lowercase())
+        .then_with(|| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+}
+
+/// Orden por artista (título como desempate), insensible a mayúsculas.
+pub(crate) fn cmp_by_artist(a: &Track, b: &Track) -> std::cmp::Ordering {
+    a.artist
+        .to_lowercase()
+        .cmp(&b.artist.to_lowercase())
+        .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+}
+
 #[async_trait]
 pub trait MusicProvider: Send + Sync {
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<Track>>;

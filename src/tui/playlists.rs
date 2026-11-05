@@ -45,40 +45,50 @@ pub(super) fn block(title: String, accent: ratatui::style::Color) -> Block<'stat
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let items: Vec<ListItem> = app
-        .playlists
-        .items
+    let smart_kinds = app.visible_smart_kinds();
+    let mut items: Vec<ListItem> = smart_kinds
         .iter()
-        .map(|playlist| {
-            ListItem::new(format!("{} ({})", playlist.name, playlist.tracks.len()))
+        .map(|kind| {
+            let count = kind.tracks(&app.stats, &app.favorites).len();
+            ListItem::new(format!("✦ {} ({count})", kind.name()))
         })
         .collect();
+    items.extend(app.playlists.items.iter().map(|playlist| {
+        ListItem::new(format!("{} ({})", playlist.name, playlist.tracks.len()))
+    }));
     let list = List::new(items)
         .block(block("Playlists (P)".to_string(), app.theme.accent))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_list_state);
-    draw_hints(frame, area, "Enter abrir · n nueva · d eliminar (x2) · Esc cerrar", app.theme.muted);
+    draw_hints(frame, area, "Enter abrir · n nueva · d eliminar (x2) · ✦ inteligente · Esc cerrar", app.theme.muted);
 }
 
-fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
-    let Some(playlist_ref) = app.playlists.items.get(playlist) else {
+fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, target: crate::app::ContentTarget) {
+    if let crate::app::ContentTarget::Stored(index) = target
+        && app.playlists.items.get(index).is_none()
+    {
         app.overlay = Overlay::List;
         return;
-    };
-    let visible = app.visible_content(playlist);
-    let total = playlist_ref.tracks.len();
+    }
+    let visible = app.visible_content(target);
+    let tracks = app.content_tracks(target);
+    let total = tracks.len();
     let filter_note = if visible.len() != total {
         format!("{}/{}", visible.len(), total)
     } else {
         total.to_string()
     };
-    let title = format!("Playlist: {} ({filter_note})", playlist_ref.name);
+    let name = app.content_name(target);
+    let title = match target {
+        crate::app::ContentTarget::Stored(_) => format!("Playlist: {name} ({filter_note})"),
+        crate::app::ContentTarget::Smart(_) => format!("✦ {name} ({filter_note})"),
+    };
     let items: Vec<ListItem> = visible
         .iter()
         .enumerate()
         .map(|(v, real)| {
-            let track = &playlist_ref.tracks[*real];
+            let track = &tracks[*real];
             let playing = app
                 .queue
                 .current_track()
@@ -125,12 +135,16 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, playlist: usize) {
             app.theme.muted,
         );
     } else {
-        draw_hints(
-            frame,
-            area,
-            "Enter reproducir · a cola · / filtrar · A toda · d quitar · J/K mover · Esc volver",
-            app.theme.muted,
-        );
+        let hints = match target {
+            crate::app::ContentTarget::Stored(_) => {
+                "Enter reproducir · a cola · A toda · / filtrar · d quitar · J/K mover · Esc volver"
+            }
+            // Las inteligentes no admiten quitar ni mover: solo lectura.
+            crate::app::ContentTarget::Smart(_) => {
+                "solo lectura · Enter reproducir · a cola · A toda · / filtrar · s/S ordenar · X m3u · Esc volver"
+            }
+        };
+        draw_hints(frame, area, hints, app.theme.muted);
     }
 }
 

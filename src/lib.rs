@@ -14,6 +14,7 @@ pub mod providers;
 pub mod queue;
 pub mod random;
 pub mod session;
+pub mod smart;
 pub mod state_file;
 pub mod stats;
 pub mod system;

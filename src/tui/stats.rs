@@ -126,13 +126,8 @@ pub fn draw_path_input(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, area);
     let title = match action {
         crate::app::PathAction::ExportJson(_) => "Exportar JSON a:".to_string(),
-        crate::app::PathAction::ExportM3u(index) => {
-            let name = app
-                .playlists
-                .items
-                .get(*index)
-                .map_or("playlist", |p| p.name.as_str());
-            format!("Exportar «{name}» a M3U:")
+        crate::app::PathAction::ExportM3u(target) => {
+            format!("Exportar «{}» a M3U:", app.content_name(*target))
         }
         crate::app::PathAction::Import => "Importar desde (.json / .m3u):".to_string(),
     };

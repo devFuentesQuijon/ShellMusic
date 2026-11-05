@@ -212,8 +212,8 @@ pub enum Overlay {
     Closed,
     /// Lista de playlists.
     List,
-    /// Contenido de la playlist con ese índice.
-    Content(usize),
+    /// Contenido de una playlist: guardada (índice) o inteligente virtual.
+    Content(ContentTarget),
     /// Input de nombre al crear una playlist.
     NameInput(NameContext),
     /// Selector de playlist para añadir la pista dada.
@@ -234,13 +234,22 @@ pub enum Overlay {
     Command,
 }
 
+/// Destino del overlay de contenido de playlist (RF-65): una playlist
+/// guardada (índice en `playlists.items`) o una playlist inteligente virtual,
+/// que se materializa en `App::smart_tracks` al abrirla.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentTarget {
+    Stored(usize),
+    Smart(crate::smart::SmartKind),
+}
+
 /// Acción que ejecuta `Overlay::PathInput` al confirmar la ruta.
 #[derive(Debug, Clone)]
 pub enum PathAction {
     /// Copia de seguridad JSON con el ámbito elegido.
     ExportJson(crate::portable::ExportScope),
-    /// Exportar la playlist con ese índice a M3U.
-    ExportM3u(usize),
+    /// Exportar a M3U el contenido del destino dado.
+    ExportM3u(ContentTarget),
     /// Importar desde JSON o M3U según la extensión.
     Import,
 }
@@ -328,6 +337,14 @@ pub struct App {
     pub queue_state: ListState,
     pub favorites: Favorites,
     pub favorites_state: ListState,
+    /// Filtro en vivo del panel de cola (`/` para editar): subcadena en
+    /// título/artista; la selección opera sobre la lista visible.
+    pub queue_filter: String,
+    pub queue_filter_state: FilterState,
+    /// Semilla one-shot de la radio (fase 25): la próxima expansión se
+    /// basa en esta pista en vez de en la que suena; se consume al usarla
+    /// y se limpia al apagar la radio.
+    pub radio_seed: Option<Track>,
     /// Filtro en vivo del panel de favoritos (`/` para editar): subcadena en
     /// título/artista; la selección opera sobre la lista visible.
     pub favorites_filter: String,
@@ -339,6 +356,10 @@ pub struct App {
     /// Filtro en vivo del contenido de playlist (mismo mecanismo que favoritos).
     pub content_filter: String,
     pub content_filter_state: FilterState,
+    /// Pistas materializadas de la playlist inteligente abierta (RF-65); el
+    /// orden de vista no persiste. Vacío cuando el contenido abierto es una
+    /// playlist guardada.
+    pub smart_tracks: Vec<Track>,
     /// Filas visibles de los paneles de listas (resultados/cola/favoritos):
     /// la fija el render en cada frame; alimenta los saltos PgUp/PgDn.
     pub list_page_size: usize,
@@ -429,6 +450,10 @@ pub struct App {
     pub sleep_timer: Option<SleepTimer>,
     /// Último borrado reversible (tecla `u`).
     pub undo: Option<UndoAction>,
+    /// Saltos automáticos consecutivos por pista caída (autoskip): la guarda
+    /// frena el bucle cuando el fallo es general y no de una pista concreta.
+    /// Se reinicia con cada arranque confirmado y con el stop.
+    pub consecutive_skips: u8,
     /// Título de la pista de la letra cargada/pedida.
     pub lyrics_title: String,
     /// Scroll del overlay de letras (líneas).
@@ -534,8 +559,11 @@ impl App {
             overlay_input: String::new(),
             favorites_filter: String::new(),
             favorites_filter_state: FilterState::Off,
+            queue_filter: String::new(),
+            queue_filter_state: FilterState::Off,
             content_filter: String::new(),
             content_filter_state: FilterState::Off,
+            smart_tracks: Vec::new(),
             pending_delete: None,
             status: PlaybackStatus {
                 volume: config.audio.initial_volume,
@@ -557,6 +585,7 @@ impl App {
             )],
             active_provider: 0,
             radio: config.radio.enabled,
+            radio_seed: None,
             radio_mode: RadioMode::from_name(&config.radio.mode).unwrap_or_default(),
             repeat: RepeatMode::default(),
             played: HashSet::new(),
@@ -592,6 +621,7 @@ impl App {
             lyrics_follow: true,
             sleep_timer: None,
             undo: None,
+            consecutive_skips: 0,
             lyrics_title: String::new(),
             lyrics_scroll: 0,
             picker: None,
@@ -641,6 +671,10 @@ impl App {
 
     pub fn toggle_radio(&mut self) {
         self.radio = !self.radio;
+        if !self.radio {
+            // Apagar la radio descarta cualquier semilla pendiente.
+            self.radio_seed = None;
+        }
         self.radio_epoch += 1;
         self.message = Some(Message::info(if self.radio {
             "Modo radio activado"
@@ -684,11 +718,42 @@ impl App {
         self.queue_state.selected()
     }
 
+    /// Índices reales de las pistas de la cola visibles con el filtro actual
+    /// (todos si no hay filtro activo o está vacío).
+    pub fn visible_queue(&self) -> Vec<usize> {
+        visible_indices(&self.queue.tracks, &self.queue_filter, &self.queue_filter_state)
+    }
+
+    /// Pista de la cola en la posición visible (doble indirección
+    /// visible→real, mismo patrón que favoritos).
+    pub fn queue_at(&self, visible: usize) -> Option<Track> {
+        let real = self.visible_queue().get(visible).copied()?;
+        self.queue.tracks.get(real).cloned()
+    }
+
+    /// Índice real de la cola correspondiente a una posición visible.
+    pub fn queue_real_index(&self, visible: usize) -> Option<usize> {
+        self.visible_queue().get(visible).copied()
+    }
+
+    /// Selección en coordenadas visibles (clampeada a la lista visible).
     pub fn queue_select(&mut self, index: usize) {
-        if !self.queue.is_empty() {
-            self.queue_state
-                .select(Some(index.min(self.queue.len() - 1)));
+        let len = self.visible_queue().len();
+        if len > 0 {
+            self.queue_state.select(Some(index.min(len - 1)));
         }
+    }
+
+    /// Selección por índice real (p. ej. al auto-reproducir una pista que el
+    /// filtro oculta): cae en la posición visible de esa pista, o en la
+    /// primera visible si no pasa el filtro.
+    pub fn queue_select_real(&mut self, real: usize) {
+        let visible = self
+            .visible_queue()
+            .iter()
+            .position(|index| *index == real)
+            .unwrap_or(0);
+        self.queue_select(visible);
     }
 
     pub(super) fn favorites_selected(&self) -> Option<usize> {
@@ -724,33 +789,76 @@ impl App {
         self.visible_favorites().get(visible).copied()
     }
 
+    /// Pistas del contenido abierto: las de la playlist guardada o las
+    /// materializadas de la inteligente.
+    pub fn content_tracks(&self, target: ContentTarget) -> &[Track] {
+        match target {
+            ContentTarget::Stored(index) => self
+                .playlists
+                .items
+                .get(index)
+                .map_or(&[], |playlist| &playlist.tracks),
+            ContentTarget::Smart(_) => &self.smart_tracks,
+        }
+    }
+
+    /// Nombre del contenido abierto (título del borde y exportaciones).
+    pub fn content_name(&self, target: ContentTarget) -> String {
+        match target {
+            ContentTarget::Stored(index) => self
+                .playlists
+                .items
+                .get(index)
+                .map_or_else(|| "playlist".to_string(), |playlist| playlist.name.clone()),
+            ContentTarget::Smart(kind) => kind.name().to_string(),
+        }
+    }
+
+    /// Playlists inteligentes con al menos una pista, en orden de panel. Las
+    /// vacías se ocultan: sin datos aún no aportan y desplazan filas.
+    pub fn visible_smart_kinds(&self) -> Vec<crate::smart::SmartKind> {
+        crate::smart::SmartKind::ALL
+            .into_iter()
+            .filter(|kind| !kind.tracks(&self.stats, &self.favorites).is_empty())
+            .collect()
+    }
+
+    /// Filas del panel de playlists: las inteligentes no vacías primero,
+    /// luego las guardadas.
+    pub fn playlist_row_count(&self) -> usize {
+        self.visible_smart_kinds().len() + self.playlists.items.len()
+    }
+
+    /// Traduce una fila del panel en el índice de la playlist guardada
+    /// (`None` si la fila es una inteligente o está fuera de rango).
+    pub fn playlist_row_to_stored(&self, row: usize) -> Option<usize> {
+        row.checked_sub(self.visible_smart_kinds().len())
+            .filter(|index| *index < self.playlists.items.len())
+    }
+
     /// Índices reales de pistas visibles del contenido de la playlist.
-    pub fn visible_content(&self, playlist: usize) -> Vec<usize> {
-        let Some(pl) = self.playlists.items.get(playlist) else {
-            return Vec::new();
-        };
-        visible_indices(&pl.tracks, &self.content_filter, &self.content_filter_state)
+    pub fn visible_content(&self, target: ContentTarget) -> Vec<usize> {
+        visible_indices(
+            self.content_tracks(target),
+            &self.content_filter,
+            &self.content_filter_state,
+        )
     }
 
     /// Índice real de la pista en la posición visible del contenido.
-    pub fn content_real_index(&self, playlist: usize, visible: usize) -> Option<usize> {
-        self.visible_content(playlist).get(visible).copied()
+    pub fn content_real_index(&self, target: ContentTarget, visible: usize) -> Option<usize> {
+        self.visible_content(target).get(visible).copied()
     }
 
     /// Pista del contenido en la posición visible.
-    pub fn content_at(&self, playlist: usize, visible: usize) -> Option<Track> {
-        let real = self.content_real_index(playlist, visible)?;
-        self.playlists
-            .items
-            .get(playlist)?
-            .tracks
-            .get(real)
-            .cloned()
+    pub fn content_at(&self, target: ContentTarget, visible: usize) -> Option<Track> {
+        let real = self.content_real_index(target, visible)?;
+        self.content_tracks(target).get(real).cloned()
     }
 
     /// Selección de contenido clampeada a la lista visible.
-    pub fn content_select(&mut self, playlist: usize, index: usize) {
-        let len = self.visible_content(playlist).len();
+    pub fn content_select(&mut self, target: ContentTarget, index: usize) {
+        let len = self.visible_content(target).len();
         if len > 0 {
             self.overlay_content_state.select(Some(index.min(len - 1)));
         }
@@ -780,16 +888,16 @@ impl App {
     }
 
     pub fn overlay_list_select(&mut self, index: usize) {
-        if !self.playlists.items.is_empty() {
-            self.overlay_list_state
-                .select(Some(index.min(self.playlists.items.len() - 1)));
+        let len = self.playlist_row_count();
+        if len > 0 {
+            self.overlay_list_state.select(Some(index.min(len - 1)));
         }
     }
 
-    pub fn overlay_content_select(&mut self, playlist: usize, index: usize) {
+    pub fn overlay_content_select(&mut self, target: ContentTarget, index: usize) {
         // Delega en content_select: la selección vive en coordenadas visibles
         // (filtradas) desde la fase 22.
-        self.content_select(playlist, index);
+        self.content_select(target, index);
     }
 
     pub(super) fn save_playlists(&mut self) {
@@ -936,18 +1044,30 @@ impl App {
                     }
                 }
             }
-            PathAction::ExportM3u(playlist) => {
-                let Some(playlist) = self.playlists.items.get(*playlist) else {
-                    self.message = Some(Message::error("la playlist ya no existe"));
-                    self.overlay = Overlay::Closed;
-                    return;
+            PathAction::ExportM3u(target) => {
+                let text = match target {
+                    ContentTarget::Stored(index) => {
+                        let Some(playlist) = self.playlists.items.get(*index) else {
+                            self.message = Some(Message::error("la playlist ya no existe"));
+                            self.overlay = Overlay::Closed;
+                            return;
+                        };
+                        crate::portable::export_m3u(playlist)
+                    }
+                    // Las inteligentes exportan su vista materializada.
+                    ContentTarget::Smart(kind) => {
+                        let playlist = crate::playlists::Playlist {
+                            name: kind.name().to_string(),
+                            tracks: self.smart_tracks.clone(),
+                        };
+                        crate::portable::export_m3u(&playlist)
+                    }
                 };
-                let text = crate::portable::export_m3u(playlist);
                 match crate::portable::write_export(&path, &text) {
                     Ok(()) => {
                         self.message =
                             Some(Message::info(format!("exportado a {}", path.display())));
-                        self.overlay = Overlay::Content(self.playlist_index_of(playlist));
+                        self.overlay = Overlay::Content(*target);
                     }
                     Err(err) => {
                         self.message = Some(Message::error(format!("no se pudo exportar: {err}")));
@@ -956,14 +1076,6 @@ impl App {
             }
             PathAction::Import => self.import_path(&path),
         }
-    }
-
-    fn playlist_index_of(&self, playlist: &crate::playlists::Playlist) -> usize {
-        self.playlists
-            .items
-            .iter()
-            .position(|p| p.name == playlist.name)
-            .unwrap_or(0)
     }
 
     fn import_path(&mut self, path: &std::path::Path) {
@@ -1210,12 +1322,66 @@ mod tests {
 
         app.content_filter = "alp".to_string();
         app.content_filter_state = FilterState::Applied;
-        assert_eq!(app.visible_content(pl), vec![0, 2]);
-        assert_eq!(app.content_at(pl, 1).unwrap().id, "c");
-        assert_eq!(app.content_real_index(pl, 1), Some(2));
+        let target = ContentTarget::Stored(pl);
+        assert_eq!(app.visible_content(target), vec![0, 2]);
+        assert_eq!(app.content_at(target, 1).unwrap().id, "c");
+        assert_eq!(app.content_real_index(target, 1), Some(2));
         // Selección clampeada a la visible.
-        app.content_select(pl, usize::MAX);
+        app.content_select(target, usize::MAX);
         assert_eq!(app.overlay_content_state.selected(), Some(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn smart_content_uses_materialized_tracks() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-smart-content-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        let mut app = App::with_data_dir(&Config::default(), &dir).unwrap();
+        app.stats.record(&track_named("a", "Alpha", "X"));
+        app.stats.record(&track_named("a", "Alpha", "X"));
+        app.stats.record(&track_named("b", "Beta", "Y"));
+        let tracks = crate::smart::SmartKind::Top.tracks(&app.stats, &app.favorites);
+        app.smart_tracks = tracks;
+
+        let target = ContentTarget::Smart(crate::smart::SmartKind::Top);
+        assert_eq!(app.content_tracks(target).len(), 2);
+        assert_eq!(app.content_at(target, 0).unwrap().id, "a");
+        assert_eq!(app.content_name(target), "Más escuchadas");
+        // El filtro funciona igual que en una playlist guardada.
+        app.content_filter = "bet".to_string();
+        app.content_filter_state = FilterState::Applied;
+        assert_eq!(app.visible_content(target), vec![1]);
+        assert_eq!(app.content_at(target, 0).unwrap().id, "b");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn playlist_rows_mix_smart_and_stored() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-smart-rows-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        let mut app = App::with_data_dir(&Config::default(), &dir).unwrap();
+        // Sin datos solo hay las filas guardadas (aquí: ninguna).
+        assert_eq!(app.playlist_row_count(), 0);
+        app.playlists.create("mix").unwrap();
+        assert_eq!(app.playlist_row_count(), 1);
+        assert_eq!(app.playlist_row_to_stored(0), Some(0));
+
+        // Con estadísticas aparece la smart antes que la guardada.
+        app.stats.record(&track_named("a", "Alpha", "X"));
+        assert_eq!(app.visible_smart_kinds(), vec![crate::smart::SmartKind::Top]);
+        assert_eq!(app.playlist_row_count(), 2);
+        assert_eq!(app.playlist_row_to_stored(0), None, "fila 0 es la smart");
+        assert_eq!(app.playlist_row_to_stored(1), Some(0));
+        assert_eq!(app.playlist_row_to_stored(2), None, "fuera de rango");
+        // El clamp de la selección cubre las dos filas.
+        app.overlay_list_select(usize::MAX);
+        assert_eq!(app.overlay_list_state.selected(), Some(1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1390,5 +1556,65 @@ mod tests {
         )
         .unwrap();
         assert_eq!(app.radio_mode, RadioMode::Artista);
+    }
+
+    fn app_with_queue_tracks(name: &str, ids: &[(&str, &str, &str)]) -> App {
+        let mut app = App::with_data_dir(
+            &Config::default(),
+            &std::env::temp_dir().join(format!(
+                "shellmusic-{name}-{}-{:016x}",
+                std::process::id(),
+                crate::state_file::random_suffix()
+            )),
+        )
+        .unwrap();
+        for (id, title, artist) in ids {
+            app.queue.add(track_named(id, title, artist));
+        }
+        app
+    }
+
+    #[test]
+    fn queue_visible_mapping_with_filter() {
+        let mut app = app_with_queue_tracks(
+            "queue-filter",
+            &[
+                ("a", "One More Time", "Daft Punk"),
+                ("b", "Bohemian", "Queen"),
+                ("c", "Around the World", "Daft Punk"),
+            ],
+        );
+
+        // Sin filtro: identidad y coordenadas reales coinciden.
+        assert_eq!(app.visible_queue(), vec![0, 1, 2]);
+        assert_eq!(app.queue_at(1).unwrap().id, "b");
+
+        app.queue_filter = "daft".to_string();
+        app.queue_filter_state = FilterState::Applied;
+        assert_eq!(app.visible_queue(), vec![0, 2]);
+        assert_eq!(app.queue_at(1).unwrap().id, "c");
+        assert_eq!(app.queue_real_index(1), Some(2));
+        assert_eq!(app.queue_real_index(2), None);
+
+        // Selección visible clampeada a la lista filtrada.
+        app.queue_select(usize::MAX);
+        assert_eq!(app.queue_selected(), Some(1));
+
+        // La selección por índice real mapea a visible, y cae en la primera
+        // visible cuando el filtro oculta la pista.
+        app.queue_select_real(2);
+        assert_eq!(app.queue_selected(), Some(1));
+        app.queue_select_real(1);
+        assert_eq!(app.queue_selected(), Some(0), "la oculta cae a la primera");
+    }
+
+    #[test]
+    fn queue_filter_empty_matches_nothing_selectable() {
+        let mut app = app_with_queue_tracks("queue-filter-vacio", &[("a", "Alpha", "X")]);
+        app.queue_filter = "zzz".to_string();
+        app.queue_filter_state = FilterState::Applied;
+        assert!(app.visible_queue().is_empty());
+        app.queue_select(0);
+        assert_eq!(app.queue_selected(), None, "sin visibles no hay selección");
     }
 }

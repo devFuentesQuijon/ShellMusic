@@ -16,7 +16,8 @@ use super::playback::{
     spawn_player, submit_search, toggle_favorite, undo_last,
 };
 use super::state::{
-    App, FilterState, Focus, Message, NameContext, Overlay, PathAction, StatsView, UndoAction,
+    App, ContentTarget, FilterState, Focus, Message, NameContext, Overlay, PathAction, StatsView,
+    UndoAction,
 };
 
 const VOLUME_STEP: i16 = 5;
@@ -63,12 +64,8 @@ pub(super) fn handle_mouse(
             } else if app.areas.queue.contains(pos.into()) {
                 clear_favorites_filter(app);
                 app.focus = Focus::Queue;
-                select_row(
-                    &mut app.queue_state,
-                    app.queue.len(),
-                    app.areas.queue,
-                    mouse.row,
-                );
+                let visible_len = app.visible_queue().len();
+                select_row(&mut app.queue_state, visible_len, app.areas.queue, mouse.row);
                 true
             } else if app.areas.favorites.contains(pos.into()) {
                 app.focus = Focus::Favorites;
@@ -223,12 +220,42 @@ pub(super) fn handle_key(
             KeyCode::Char('G') => app.select(usize::MAX),
             _ => playback_key(app, key, player, tx),
         },
-        Focus::Queue => match key.code {
-            KeyCode::Tab => app.focus = app.focus.next(),
-            KeyCode::BackTab => app.focus = app.focus.prev(),
-            KeyCode::Esc => app.focus = Focus::Browsing,
+        Focus::Queue => {
+            // Con el filtro en edición las teclas alimentan el filtro, no la
+            // lista (mismo patrón que favoritos).
+            if matches!(app.queue_filter_state, FilterState::Editing) {
+                filter_edit_key(&mut app.queue_filter, &mut app.queue_filter_state, key);
+                app.queue_select(0);
+                return;
+            }
+            match key.code {
+            KeyCode::Tab => {
+                clear_queue_filter(app);
+                app.focus = app.focus.next();
+            }
+            KeyCode::BackTab => {
+                clear_queue_filter(app);
+                app.focus = app.focus.prev();
+            }
+            KeyCode::Esc => {
+                // Esc suelta el filtro si estaba aplicado; si no, vuelve a
+                // resultados como siempre.
+                if matches!(app.queue_filter_state, FilterState::Applied) {
+                    clear_queue_filter(app);
+                    app.queue_select(0);
+                } else {
+                    app.focus = Focus::Browsing;
+                }
+            }
+            KeyCode::Char('/') => {
+                app.queue_filter.clear();
+                app.queue_filter_state = FilterState::Editing;
+            }
             KeyCode::Enter => {
-                if let Some(index) = app.queue_selected() {
+                if let Some(index) = app
+                    .queue_selected()
+                    .and_then(|visible| app.queue_real_index(visible))
+                {
                     play_queue_track(app, player, tx, index);
                 }
             }
@@ -242,38 +269,40 @@ pub(super) fn handle_key(
                 }
             }
             KeyCode::Char('e') => {
-                if let Some(index) = app.queue_selected() {
-                    let track = app.queue.tracks[index].clone();
+                if let Some(track) = app.queue_selected().and_then(|v| app.queue_at(v)) {
                     let new_index = add_next_to_queue(app, track);
-                    app.queue_select(new_index);
+                    app.queue_select_real(new_index);
                 }
             }
             KeyCode::Char('f') => {
                 let track = app
                     .queue_selected()
-                    .and_then(|i| app.queue.tracks.get(i))
-                    .or_else(|| app.queue.current_track());
-                toggle_favorite(app, track.cloned());
+                    .and_then(|v| app.queue_at(v))
+                    .or_else(|| app.queue.current_track().cloned());
+                toggle_favorite(app, track);
             }
             KeyCode::Char('A') => {
                 let track = app
                     .queue_selected()
-                    .and_then(|i| app.queue.tracks.get(i))
-                    .or_else(|| app.queue.current_track());
-                open_pick_playlist(app, track.cloned());
+                    .and_then(|v| app.queue_at(v))
+                    .or_else(|| app.queue.current_track().cloned());
+                open_pick_playlist(app, track);
             }
             KeyCode::Char('J') => {
-                if let Some(index) = app.queue_selected()
-                    && app.queue.move_down(index)
+                if let Some(visible) = app.queue_selected()
+                    && let Some(real) = app.queue_real_index(visible)
+                    && app.queue.move_down(real)
                 {
-                    app.queue_select(index + 1);
+                    // Mantener la posición visible, como en el contenido de playlist.
+                    app.queue_select(visible);
                 }
             }
             KeyCode::Char('K') => {
-                if let Some(index) = app.queue_selected()
-                    && app.queue.move_up(index)
+                if let Some(visible) = app.queue_selected()
+                    && let Some(real) = app.queue_real_index(visible)
+                    && app.queue.move_up(real)
                 {
-                    app.queue_select(index - 1);
+                    app.queue_select(visible);
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -302,13 +331,14 @@ pub(super) fn handle_key(
             // perderla de vista; la lista se desplaza hasta ella sola.
             KeyCode::Char('c') => {
                 if let Some(current) = app.queue.current {
-                    app.queue_select(current);
+                    app.queue_select_real(current);
                 } else {
                     app.message = Some(Message::info("nada en reproducción"));
                 }
             }
             _ => playback_key(app, key, player, tx),
-        },
+            }
+        }
         Focus::Favorites => {
             // Con el filtro en edición las teclas alimentan el filtro, no la
             // lista (mismo patrón que la caja de búsqueda principal).
@@ -486,6 +516,12 @@ fn clear_favorites_filter(app: &mut App) {
     app.favorites_filter_state = FilterState::Off;
 }
 
+/// El filtro de cola es estado del foco: salir de él lo limpia.
+fn clear_queue_filter(app: &mut App) {
+    app.queue_filter.clear();
+    app.queue_filter_state = FilterState::Off;
+}
+
 /// Teclas de reproducción compartidas por los focos Browsing y Queue.
 fn playback_key(
     app: &mut App,
@@ -564,6 +600,24 @@ fn playback_key(
             }
             _ => app.message = Some(Message::info("sin artista que buscar")),
         },
+        // B: radio basada en la pista seleccionada (o la que suena): la próxima
+        // expansión se siembra desde ella en vez de desde la actual.
+        KeyCode::Char('B') => {
+            match current_or_selected(app) {
+                Some(track) => {
+                    app.radio_seed = Some(track.clone());
+                    if !app.radio {
+                        app.toggle_radio();
+                    }
+                    app.message = Some(Message::info(format!(
+                        "radio basada en «{}» ({})",
+                        track.title, app.radio_mode
+                    )));
+                    radio_prefetch(app, tx);
+                }
+                None => app.message = Some(Message::info("sin pista que sembrar")),
+            }
+        }
         // 0–9: seek al 0–90 % de la pista, como mpv.
         KeyCode::Char(c) if c.is_ascii_digit() => {
             let digit = u32::from(c) - u32::from('0');
@@ -619,7 +673,7 @@ fn handle_overlay_key(
     match overlay {
         Overlay::Closed => {}
         Overlay::List => overlay_list_key(app, key),
-        Overlay::Content(playlist) => overlay_content_key(app, key, player, tx, playlist),
+        Overlay::Content(target) => overlay_content_key(app, key, player, tx, target),
         Overlay::NameInput(context) => overlay_name_key(app, key, context),
         Overlay::Pick(track) => overlay_pick_key(app, key, track),
         Overlay::Help => match key.code {
@@ -645,10 +699,7 @@ fn current_or_selected(app: &App) -> Option<Track> {
     }
     match app.focus {
         Focus::Browsing => app.selected().and_then(|i| app.results.get(i)).cloned(),
-        Focus::Queue => app
-            .queue_selected()
-            .and_then(|i| app.queue.tracks.get(i))
-            .cloned(),
+        Focus::Queue => app.queue_selected().and_then(|i| app.queue_at(i)),
         Focus::Favorites => app.favorites_selected().and_then(|i| app.favorite_at(i)),
         Focus::Searching => None,
     }
@@ -836,7 +887,7 @@ fn overlay_path_key(app: &mut App, key: KeyEvent, action: &PathAction) {
         KeyCode::Esc => {
             app.overlay = match action {
                 PathAction::ExportJson(_) => Overlay::Export,
-                PathAction::ExportM3u(playlist) => Overlay::Content(*playlist),
+                PathAction::ExportM3u(target) => Overlay::Content(*target),
                 PathAction::Import => Overlay::Closed,
             };
         }
@@ -860,39 +911,57 @@ fn overlay_list_key(app: &mut App, key: KeyEvent) {
             app.overlay = Overlay::NameInput(NameContext::Plain);
         }
         KeyCode::Char('d') => {
-            if let Some(index) = app.overlay_list_state.selected() {
-                if app.pending_delete == Some(index) {
-                    if let Some(playlist) = app.playlists.delete(index) {
-                        app.message = Some(Message::info(format!(
-                            "playlist «{}» eliminada",
-                            playlist.name
-                        )));
-                        app.save_playlists();
-                    }
-                    app.pending_delete = None;
-                    if app.playlists.items.is_empty() {
-                        app.overlay_list_state.select(None);
-                    } else {
-                        app.overlay_list_select(index);
-                    }
-                } else if let Some(playlist) = app.playlists.items.get(index) {
-                    app.pending_delete = Some(index);
+            let Some(index) = app.overlay_list_state.selected() else {
+                return;
+            };
+            // Las inteligentes (encabezado del listado) no se eliminan.
+            if app.visible_smart_kinds().get(index).is_some() {
+                app.pending_delete = None;
+                app.message = Some(Message::info(
+                    "las playlists inteligentes no se pueden eliminar",
+                ));
+                return;
+            }
+            let Some(stored) = app.playlist_row_to_stored(index) else {
+                return;
+            };
+            if app.pending_delete == Some(index) {
+                if let Some(playlist) = app.playlists.delete(stored) {
                     app.message = Some(Message::info(format!(
-                        "pulsa d de nuevo para eliminar «{}»",
+                        "playlist «{}» eliminada",
                         playlist.name
                     )));
+                    app.save_playlists();
                 }
+                app.pending_delete = None;
+                if app.playlist_row_count() == 0 {
+                    app.overlay_list_state.select(None);
+                } else {
+                    app.overlay_list_select(index);
+                }
+            } else if let Some(playlist) = app.playlists.items.get(stored) {
+                app.pending_delete = Some(index);
+                app.message = Some(Message::info(format!(
+                    "pulsa d de nuevo para eliminar «{}»",
+                    playlist.name
+                )));
             }
         }
         KeyCode::Enter => {
-            if let Some(index) = app.overlay_list_state.selected()
-                && index < app.playlists.items.len()
-            {
+            if let Some(index) = app.overlay_list_state.selected() {
                 // Visita nueva: el filtro de contenido arranca limpio.
                 app.content_filter.clear();
                 app.content_filter_state = FilterState::Off;
-                app.overlay = Overlay::Content(index);
-                app.overlay_content_select(index, 0);
+                if let Some(kind) = app.visible_smart_kinds().get(index).copied() {
+                    app.smart_tracks = kind.tracks(&app.stats, &app.favorites);
+                    let target = ContentTarget::Smart(kind);
+                    app.overlay = Overlay::Content(target);
+                    app.overlay_content_select(target, 0);
+                } else if let Some(stored) = app.playlist_row_to_stored(index) {
+                    let target = ContentTarget::Stored(stored);
+                    app.overlay = Overlay::Content(target);
+                    app.overlay_content_select(target, 0);
+                }
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
@@ -926,12 +995,12 @@ fn overlay_content_key(
     key: KeyEvent,
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
-    playlist: usize,
+    target: ContentTarget,
 ) {
     // Edición del filtro: las teclas alimentan el texto (como en favoritos).
     if matches!(app.content_filter_state, FilterState::Editing) {
         filter_edit_key(&mut app.content_filter, &mut app.content_filter_state, key);
-        app.content_select(playlist, 0);
+        app.content_select(target, 0);
         return;
     }
     let selected = app.overlay_content_state.selected();
@@ -940,7 +1009,7 @@ fn overlay_content_key(
             if matches!(app.content_filter_state, FilterState::Applied) {
                 app.content_filter.clear();
                 app.content_filter_state = FilterState::Off;
-                app.content_select(playlist, 0);
+                app.content_select(target, 0);
             } else {
                 app.overlay = Overlay::List;
             }
@@ -951,7 +1020,7 @@ fn overlay_content_key(
         }
         KeyCode::Enter => {
             if let Some(index) = selected
-                && let Some(track) = app.content_at(playlist, index)
+                && let Some(track) = app.content_at(target, index)
             {
                 // El overlay permanece abierto para seguir gestionando la playlist.
                 app.queue.prune_played();
@@ -961,17 +1030,16 @@ fn overlay_content_key(
         }
         KeyCode::Char('a') => {
             if let Some(index) = selected
-                && let Some(track) = app.content_at(playlist, index)
+                && let Some(track) = app.content_at(target, index)
             {
                 add_to_queue(app, track);
             }
         }
-        // Reproducir la playlist entera: encola todo y suena la primera.
+        // Reproducir la lista entera: encola todo y suena la primera.
         KeyCode::Char('A') => {
-            if let Some(tracks) = app.playlists.items.get(playlist).map(|p| p.tracks.clone())
-                && !tracks.is_empty()
-            {
-                let name = app.playlists.items[playlist].name.clone();
+            let tracks = app.content_tracks(target).to_vec();
+            if !tracks.is_empty() {
+                let name = app.content_name(target);
                 app.queue.prune_played();
                 let mut first = None;
                 for track in tracks {
@@ -980,14 +1048,18 @@ fn overlay_content_key(
                 }
                 if let Some(first) = first {
                     app.overlay = Overlay::Closed;
-                    app.message = Some(Message::info(format!("reproduciendo playlist «{name}»")));
+                    app.message = Some(Message::info(format!("reproduciendo «{name}»")));
                     play_queue_track(app, player, tx, first);
                 }
             }
         }
         KeyCode::Char('d') => {
+            let ContentTarget::Stored(playlist) = target else {
+                smart_readonly(app);
+                return;
+            };
             if let Some(visible) = selected
-                && let Some(real) = app.content_real_index(playlist, visible)
+                && let Some(real) = app.content_real_index(target, visible)
                 && let Some(track) = app.playlists.remove_track(playlist, real)
             {
                 app.undo = Some(UndoAction::PlaylistTrack {
@@ -1000,63 +1072,112 @@ fn overlay_content_key(
                     track.title
                 )));
                 app.save_playlists();
-                app.content_select(playlist, visible);
+                app.content_select(target, visible);
             }
         }
         KeyCode::Char('u') => undo_last(app),
-        // Exportar esta playlist a M3U.
+        // Ordenar el contenido: persistente en playlists guardadas, de vista
+        // en las inteligentes (no se guarda).
+        KeyCode::Char('s') => sort_content(app, target, crate::providers::cmp_by_title, "título"),
+        KeyCode::Char('S') => {
+            sort_content(app, target, crate::providers::cmp_by_artist, "artista")
+        }
+        // Exportar este contenido a M3U.
         KeyCode::Char('X') => {
-            if let Some(pl) = app.playlists.items.get(playlist) {
-                app.overlay_input =
-                    format!("~/{}.m3u", crate::portable::sanitize_filename(&pl.name));
-                app.overlay = Overlay::PathInput(PathAction::ExportM3u(playlist));
-            }
+            let name = app.content_name(target);
+            app.overlay_input =
+                format!("~/{}.m3u", crate::portable::sanitize_filename(&name));
+            app.overlay = Overlay::PathInput(PathAction::ExportM3u(target));
         }
         KeyCode::Char('J') => {
+            let ContentTarget::Stored(playlist) = target else {
+                smart_readonly(app);
+                return;
+            };
             if let Some(visible) = selected
-                && let Some(real) = app.content_real_index(playlist, visible)
+                && let Some(real) = app.content_real_index(target, visible)
                 && app.playlists.move_track_down(playlist, real)
             {
                 // Tras mover, la pista sigue siendo la misma: reanclar la
                 // selección visible requiere saber dónde quedó en la lista
                 // filtrada; lo más simple es mantener la posición visible.
-                app.content_select(playlist, visible);
+                app.content_select(target, visible);
                 app.save_playlists();
             }
         }
         KeyCode::Char('K') => {
+            let ContentTarget::Stored(playlist) = target else {
+                smart_readonly(app);
+                return;
+            };
             if let Some(visible) = selected
-                && let Some(real) = app.content_real_index(playlist, visible)
+                && let Some(real) = app.content_real_index(target, visible)
                 && app.playlists.move_track_up(playlist, real)
             {
-                app.content_select(playlist, visible);
+                app.content_select(target, visible);
                 app.save_playlists();
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
             if let Some(index) = selected {
-                app.content_select(playlist, index.saturating_sub(1));
+                app.content_select(target, index.saturating_sub(1));
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if let Some(index) = selected {
-                app.content_select(playlist, index + 1);
+                app.content_select(target, index + 1);
             }
         }
         KeyCode::PageUp => {
             if let Some(index) = selected {
-                app.content_select(playlist, index.saturating_sub(app.overlay_page_size));
+                app.content_select(target, index.saturating_sub(app.overlay_page_size));
             }
         }
         KeyCode::PageDown => {
             if let Some(index) = selected {
-                app.content_select(playlist, index.saturating_add(app.overlay_page_size));
+                app.content_select(target, index.saturating_add(app.overlay_page_size));
             }
         }
-        KeyCode::Char('g') => app.content_select(playlist, 0),
-        KeyCode::Char('G') => app.content_select(playlist, usize::MAX),
+        KeyCode::Char('g') => app.content_select(target, 0),
+        KeyCode::Char('G') => app.content_select(target, usize::MAX),
         _ => {}
     }
+}
+
+/// Aviso único para las teclas de edición sobre una playlist inteligente.
+fn smart_readonly(app: &mut App) {
+    app.message = Some(Message::info(
+        "las playlists inteligentes son de solo lectura",
+    ));
+}
+
+/// Ordena el contenido por título o artista. Persiste en playlists guardadas;
+/// en las inteligentes ordena solo la vista materializada.
+fn sort_content(
+    app: &mut App,
+    target: ContentTarget,
+    cmp: fn(&Track, &Track) -> std::cmp::Ordering,
+    what: &str,
+) {
+    let len = app.content_tracks(target).len();
+    if len < 2 {
+        app.message = Some(Message::info("lista demasiado corta para ordenar"));
+        return;
+    }
+    match target {
+        ContentTarget::Stored(playlist) => {
+            let Some(pl) = app.playlists.items.get_mut(playlist) else {
+                return;
+            };
+            pl.tracks.sort_by(cmp);
+            app.save_playlists();
+        }
+        ContentTarget::Smart(_) => {
+            app.smart_tracks.sort_by(cmp);
+        }
+    }
+    app.content_select(target, 0);
+    app.message = Some(Message::info(format!("ordenado por {what}")));
 }
 
 /// Crea una playlist con el contenido actual de la cola (en orden).

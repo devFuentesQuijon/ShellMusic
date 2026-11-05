@@ -36,12 +36,13 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | S | Resultados / Cola / Favoritos | Barajar la cola (la pista que suena mantiene su lugar) |
 | u | Resultados / Cola / Favoritos / Contenido de playlist | Deshacer el último borrado (cola, favoritos o playlist): reinserta la pista en su posición |
 | o | Resultados / Cola / Favoritos | Buscar pistas del artista de la pista seleccionada (o de la que suena) |
+| B | Resultados / Cola / Favoritos | Radio basada en la pista seleccionada (o la que suena): la próxima expansión de radio se siembra desde ella; enciende la radio si estaba apagada |
 | ? | Resultados / Cola / Favoritos | Ayuda de atajos (overlay; se cierra con Esc o ?) |
 | PgUp / PgDn | Listas (resultados, cola, favoritos, playlists) | Saltar una página |
 | g / G | Listas (resultados, cola, favoritos, playlists) | Ir al inicio / al final |
-| / | Resultados / Cola / Favoritos | Foco a búsqueda |
+| / | Resultados / Cola / Favoritos | Foco a búsqueda; en Cola o Favoritos filtra la lista en vivo (Esc suelta el filtro) |
 | / | Favoritos / Contenido de playlist | Filtrar la lista en vivo: escribe y la lista se recorta (título/artista, sin distinguir mayúsculas); Enter opera sobre la lista filtrada, Esc suelta el filtro |
-| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~15 comandos (`pause`, `vol 80`, `theme dracula`, `sleep 15`…) y Enter ejecuta el primero |
+| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~17 comandos (`pause`, `vol 80`, `theme dracula`, `sleep 15`, `sort title`…) y Enter ejecuta el primero |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
@@ -57,6 +58,15 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 
 Los mensajes informativos de la línea de estado (favorito añadido, copiado, volumen…) caducan a los ~6 s y vuelve la ayuda contextual; los errores persisten hasta la siguiente acción.
 
+## Barra del reproductor
+
+Además del progreso y los metadatos habituales (cola, volumen, repetición, radio, sleep timer) muestra el contexto de la cola:
+
+- `→ título` — la pista que sonará a continuación.
+- `+mm:ss` — duración restante de la cola (suma solo las pistas con duración conocida).
+
+Si una pista falla al cargar (stream caído), la app avisa y pasa automáticamente a la siguiente; tras 3 saltos seguidos sin éxito se detiene con el error a mano, por si el fallo es del servicio y no de la pista.
+
 ## Sleep timer
 
 Desde la paleta de comandos (`:`):
@@ -66,6 +76,11 @@ Desde la paleta de comandos (`:`):
 - `: sleep off` — cancela el timer activo.
 
 El tiempo restante se muestra en la barra del reproductor (`⏳mm:ss` o `⏳fin pista`).
+
+## Ordenar listas
+
+- `: sort title` / `: sort artist` — ordenan el panel con el foco (Cola o Favoritos) por título o por artista, insensible a mayúsculas; la pista que suena conserva su lugar en la cola.
+- Dentro del contenido de una playlist: `s` ordena por título y `S` por artista (persistente).
 
 ## Ratón
 
@@ -78,19 +93,42 @@ Activo por defecto (`[general] mouse = true`; con `false` la selección de texto
 
 ## Overlay de playlists (modal; captura todas las teclas salvo Ctrl+C)
 
+Las entradas `✦` del listado son **playlists inteligentes**: listas virtuales derivadas de tus estadísticas y favoritos (sin persistencia propia). Se ocultan mientras están vacías:
+
+- `✦ Más escuchadas` — top por reproducciones (tope 100).
+- `✦ Sin estrenar` — favoritos sin ninguna reproducción registrada.
+- `✦ Redescubrir` — última escucha hace más de 30 días, las más olvidadas primero (tope 100).
+
+Su contenido es de **solo lectura**: reproducir, encolar, filtrar, ordenar la vista y exportar a M3U funcionan; quitar, mover, renombrar y eliminar quedan desactivados con un aviso.
+
 | Tecla | Vista | Acción |
 |---|---|---|
 | ↑ / ↓ (o k / j) | Todas | Mover selección |
 | n | Lista | Nueva playlist (pide nombre) |
-| d | Lista | Eliminar playlist (pulsa `d` dos veces para confirmar) |
+| d | Lista | Eliminar playlist guardada (pulsa `d` dos veces; las inteligentes no se eliminan) |
 | Enter | Lista | Abrir contenido |
 | Enter | Contenido | Reproducir la pista (la añade a la cola) |
 | a | Contenido | Añadir la pista a la cola sin interrumpir |
-| A | Contenido | Reproducir la playlist entera (encola todo y suena la primera) |
-| d | Contenido | Quitar la pista de la playlist (se deshace con `u`) |
+| A | Contenido | Reproducir la lista entera (encola todo y suena la primera) |
+| d | Contenido | Quitar la pista de la playlist guardada (se deshace con `u`; en inteligentes: aviso de solo lectura) |
 | u | Contenido | Deshacer el último borrado |
-| J / K | Contenido | Reordenar la pista |
+| s / S | Contenido | Ordenar por título / por artista (persistente en guardadas; de vista en inteligentes) |
+| J / K | Contenido | Reordenar la pista (solo guardadas) |
 | Esc | Lista / Contenido / Selector | Cerrar / volver / cancelar |
+
+## Comandos headless (sin TTY)
+
+Con `smusic` en ejecución y `[mcp] enabled` en `config.toml`, el binario controla la instancia desde scripts, atajos del escritorio o lanzadores — sin abrir la TUI:
+
+```
+smusic play <búsqueda>   reproduce la primera coincidencia
+smusic add <búsqueda>    la añade a la cola
+smusic status            «♪ título — artista (m:ss/m:ss)» (⏸ en pausa; «nada sonando» si la cola está vacía)
+smusic pause | next | prev | stop
+smusic … --json          respuesta cruda del socket, para scripts
+```
+
+Salida legible en stdout y códigos de salida: 0 ok, 1 error (con mensaje accionable en stderr; p. ej. arrancar la app o activar `[mcp]`), 2 uso incorrecto. Los subcomandos de búsqueda esperan hasta 30 s; el control directo, 5 s. No se combinan con `-t`/`-p`/`--lastfm-auth` (esos arrancan la TUI).
 
 ## Overlay de letras
 

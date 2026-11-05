@@ -12,7 +12,8 @@ use crate::queue::Queue;
 
 use super::AppMsg;
 use super::playback::{change_volume, play_adjacent, spawn_player};
-use super::state::{App, Message, Overlay, SleepTimer};
+use super::state::{App, Focus, Message, Overlay, SleepTimer};
+use crate::providers::Track;
 
 type CommandFn = fn(&mut App, &Arc<dyn Player>, &mpsc::UnboundedSender<AppMsg>, &str);
 
@@ -70,6 +71,16 @@ const COMMANDS: &[Command] = &[
         label: "sleep <min|off|track>",
         name: "sleep",
         run: sleep_set,
+    },
+    Command {
+        label: "sort title",
+        name: "sort title",
+        run: sort_title,
+    },
+    Command {
+        label: "sort artist",
+        name: "sort artist",
+        run: sort_artist,
     },
     Command {
         label: "radio on",
@@ -243,6 +254,49 @@ fn parse_sleep(arg: &str) -> Result<Option<u64>, ()> {
     match unit {
         's' => Ok(Some(value.div_ceil(60))),
         _ => Ok(Some(value)),
+    }
+}
+
+/// `sort title` / `sort artist`: ordenan el panel con el foco (Cola o
+/// Favoritos); en contenido de playlist se ordena con `s`/`S` dentro del overlay.
+fn sort_title(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, _: &str) {
+    sort_focused(app, crate::providers::cmp_by_title, "título");
+}
+
+fn sort_artist(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, _: &str) {
+    sort_focused(app, crate::providers::cmp_by_artist, "artista");
+}
+
+fn sort_focused(
+    app: &mut App,
+    cmp: fn(&Track, &Track) -> std::cmp::Ordering,
+    what: &str,
+) {
+    match app.focus {
+        Focus::Favorites => {
+            if app.favorites.tracks.len() < 2 {
+                app.message = Some(Message::info("favoritos demasiado cortos para ordenar"));
+                return;
+            }
+            app.favorites.tracks.sort_by(cmp);
+            app.save_favorites();
+            app.favorites_select(0);
+            app.message = Some(Message::info(format!("favoritos ordenados por {what}")));
+        }
+        Focus::Queue => {
+            if app.queue.len() < 2 {
+                app.message = Some(Message::info("cola demasiado corta para ordenar"));
+                return;
+            }
+            app.queue.sort_by(cmp);
+            // La selección vuelve a la pista actual (reubicada por el orden).
+            let current = app.queue.current.unwrap_or(0);
+            app.queue_select_real(current);
+            app.message = Some(Message::info(format!("cola ordenada por {what}")));
+        }
+        Focus::Browsing | Focus::Searching => {
+            app.message = Some(Message::info("nada que ordenar aquí: foco en Cola o Favoritos"));
+        }
     }
 }
 

@@ -151,6 +151,18 @@ impl Queue {
         }
     }
 
+    /// Ordena la cola; la pista actual se reancla a la misma pista (clave
+    /// provider+id) para que la reproducción no se altere.
+    pub fn sort_by(&mut self, cmp: impl Fn(&Track, &Track) -> std::cmp::Ordering) {
+        let current_key = self.current_track().map(|t| (t.provider, t.id.clone()));
+        self.tracks.sort_by(cmp);
+        self.current = current_key.and_then(|key| {
+            self.tracks
+                .iter()
+                .position(|t| (t.provider, t.id.clone()) == key)
+        });
+    }
+
     pub fn prev_index(&self) -> Option<usize> {
         match self.current {
             Some(current) if current > 0 => Some(current - 1),
@@ -159,8 +171,7 @@ impl Queue {
         }
     }
 
-    /// Poda las pistas anteriores a la actual cuando la cola supera
-    /// MAX_QUEUE, conservando las KEEP_BEFORE_CURRENT más recientes para la
+    /// Poda las pistas anteriores a la actual cuando la cola supera    /// MAX_QUEUE, conservando las KEEP_BEFORE_CURRENT más recientes para la
     /// navegación "anterior". Devuelve cuántas se eliminaron.
     ///
     /// Llamarla ANTES de añadir una tanda de pistas: los índices capturados
@@ -408,5 +419,39 @@ mod tests {
         assert_eq!(queue.prune_played(), 0);
         assert_eq!(queue.len(), MAX_QUEUE + 10);
         assert_eq!(queue.current, Some(5));
+    }
+
+    #[test]
+    fn sort_by_reanchors_current_track() {
+        let mut queue = queue3();
+        // Títulos desordenados: a=gamma, b=alpha, c=beta.
+        queue.tracks[0].title = "gamma".to_string();
+        queue.tracks[1].title = "alpha".to_string();
+        queue.tracks[2].title = "beta".to_string();
+        queue.current = Some(2); // suena "c"
+        queue.sort_by(crate::providers::cmp_by_title);
+        let ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["b", "c", "a"]);
+        assert_eq!(queue.current, Some(1), "la actual sigue siendo c");
+        assert_eq!(queue.current_track().unwrap().id, "c");
+    }
+
+    #[test]
+    fn sort_by_artist_groups_and_keeps_current() {
+        let mut queue = Queue::new();
+        let mut z = track("z");
+        z.artist = "ZZ Top".to_string();
+        let mut a = track("a");
+        a.artist = "Abba".to_string();
+        let mut m = track("m");
+        m.artist = "Mecano".to_string();
+        queue.add(z);
+        queue.add(a);
+        queue.add(m);
+        queue.current = Some(0); // suena "z"
+        queue.sort_by(crate::providers::cmp_by_artist);
+        let ids: Vec<&str> = queue.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["a", "m", "z"]);
+        assert_eq!(queue.current, Some(2));
     }
 }
