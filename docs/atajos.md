@@ -140,11 +140,12 @@ Opt-in (`[sponsorblock] enabled = true`): al arrancar una pista de YouTube se pi
 
 ## YouTube Music con tu cuenta
 
-Opt-in (`[ytm]`), vía `ytmusicapi` (Python). Alta:
+Opt-in (`[ytm]`), vía `ytmusicapi` (Python). Alta, de más simple a manual:
 
 1. `pip install ytmusicapi`
-2. `smusic --ytm-auth` — pega las cabeceras copiadas de la petición «browse» de music.youtube.com (F12 → Red → clic derecho → copiar cabeceras) y Enter dos veces.
-3. `[ytm] enabled = true` en `config.toml`.
+2. `smusic --ytm-auth --from-browser` — extrae la sesión de las cookies de tu navegador (`pip install browser-cookie3`; con `=firefox`/`=chrome`/… eliges uno, sin `=` auto-detecta). Debes estar logueado en music.youtube.com; en Chrome/Linux el keyring del sistema debe estar desbloqueado.
+3. Si lo anterior no aplica: `smusic --ytm-auth` y pega los headers de la petición «browse» de music.youtube.com — vale cualquier formato de copia («Copiar como cURL», «Copiar como fetch» o la vista cruda de «Request Headers»); con que incluya la línea `cookie:` basta, el resto (origin, user-agent, SAPISIDHASH) se completa solo.
+4. `[ytm] enabled = true` en `config.toml`.
 
 Comandos de paleta (`:`):
 

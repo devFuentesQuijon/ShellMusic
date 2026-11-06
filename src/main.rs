@@ -30,6 +30,9 @@ async fn main() -> Result<()> {
     if flags.lastfm_auth {
         return lastfm_auth().await;
     }
+    if let Some(browser) = flags.ytm_from_browser {
+        return ytm_auth_from_browser(&browser).await;
+    }
     if flags.ytm_auth {
         return ytm_auth_interactive();
     }
@@ -174,6 +177,9 @@ Opciones:
   -p, --play <búsqueda>  busca al arrancar y reproduce la primera coincidencia
   --lastfm-auth          autoriza Last.fm interactivamente y guarda la sesión
   --ytm-auth             guarda los headers de YouTube Music (para [ytm])
+  --from-browser[=nav]   con --ytm-auth: extrae la sesión de las cookies del
+                         navegador (auto, chrome, firefox, …; pip install
+                         browser-cookie3) en lugar de pegar los headers
   -h, --help             muestra esta ayuda
 
 Comandos headless (sin TTY; requieren smusic en ejecución con [mcp] enabled):
@@ -235,6 +241,9 @@ struct TuiFlags {
     play: Option<String>,
     lastfm_auth: bool,
     ytm_auth: bool,
+    /// Alta de YouTube Music desde las cookies del navegador: "auto" o un
+    /// nombre (chrome, firefox, …). Implica `ytm_auth`.
+    ytm_from_browser: Option<String>,
 }
 
 #[derive(Debug)]
@@ -256,6 +265,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
     let mut play = None;
     let mut lastfm_auth = false;
     let mut ytm_auth = false;
+    let mut ytm_from_browser = None;
     let mut json = false;
     let mut cmd: Option<HeadlessCmd> = None;
     let mut query_parts: Vec<String> = Vec::new();
@@ -276,6 +286,17 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
             }
             "--lastfm-auth" => lastfm_auth = true,
             "--ytm-auth" => ytm_auth = true,
+            "--from-browser" => ytm_from_browser = Some("auto".to_string()),
+            other if other.starts_with("--from-browser=") => {
+                let name = other["--from-browser=".len()..].trim().to_lowercase();
+                if name.is_empty() {
+                    return Err("--from-browser necesita un nombre tras «=» o ninguno (auto)".to_string());
+                }
+                if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                    return Err(format!("nombre de navegador no válido: «{name}»"));
+                }
+                ytm_from_browser = Some(name);
+            }
             "--json" => json = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
@@ -297,9 +318,9 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
         }
     }
     if let Some(cmd) = cmd {
-        if theme.is_some() || play.is_some() || lastfm_auth || ytm_auth {
+        if theme.is_some() || play.is_some() || lastfm_auth || ytm_auth || ytm_from_browser.is_some() {
             return Err(
-                "los subcomandos headless no se combinan con -t/--theme, -p/--play ni --lastfm-auth/--ytm-auth (arrancan la TUI)"
+                "los subcomandos headless no se combinan con -t/--theme, -p/--play ni --lastfm-auth/--ytm-auth/--from-browser (arrancan otro modo)"
                     .to_string(),
             );
         }
@@ -318,11 +339,16 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> std::result::Result<Cl
                 .to_string(),
         );
     }
+    // --from-browser implica el alta de YouTube Music.
+    if ytm_from_browser.is_some() {
+        ytm_auth = true;
+    }
     Ok(Cli::Tui(TuiFlags {
         theme,
         play,
         lastfm_auth,
         ytm_auth,
+        ytm_from_browser,
     }))
 }
 
@@ -348,8 +374,11 @@ async fn lastfm_auth() -> Result<()> {
 }
 
 /// Alta interactiva en YouTube Music (RF-68): pide los headers del navegador
-/// (lo que copian las herramientas de desarrollo, en JSON o «Nombre: valor»)
-/// y los guarda en el data dir con permisos 0600 para el puente ytmusicapi.
+/// en cualquiera de los formatos que copian las herramientas de desarrollo
+/// (vista cruda «Nombre: valor», «Copiar como cURL», «Copiar como fetch» o
+/// JSON) y los guarda en el data dir con permisos 0600 para el puente
+/// ytmusicapi. Con que incluyan la cookie de sesión basta: el puente completa
+/// origin, user-agent y el SAPISIDHASH.
 fn ytm_auth_interactive() -> Result<()> {
     use std::io::BufRead;
     if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
@@ -366,8 +395,9 @@ fn ytm_auth_interactive() -> Result<()> {
     println!("Alta en YouTube Music");
     println!("  1. Abre https://music.youtube.com con tu cuenta.");
     println!("  2. F12 → Red (Network) → recarga la página.");
-    println!("  3. Clic derecho en la petición «browse» → Copiar → «Copiar cabeceras».");
-    println!("  4. Pega aquí abajo (soporta JSON y «Nombre: valor») y pulsa Enter dos veces.");
+    println!("  3. Clic derecho en la petición «browse» → «Copiar como cURL» (también vale");
+    println!("     «Copiar como fetch» o la vista cruda de «Request Headers»).");
+    println!("  4. Pégalo aquí abajo (lo único imprescindible es la línea cookie:) y pulsa Enter dos veces.");
     println!();
     let mut text = String::new();
     let stdin = std::io::stdin();
@@ -400,6 +430,32 @@ fn ytm_auth_interactive() -> Result<()> {
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
     println!("Headers guardados en {}.", path.display());
+    println!("Ahora: pip install ytmusicapi y [ytm] enabled = true en config.toml.");
+    Ok(())
+}
+
+/// Alta en YouTube Music sin DevTools (RF-68): extrae la sesión de las
+/// cookies del navegador vía browser_cookie3 y guarda los headers resultantes
+/// (JSON, 0600). `browser` es "auto" o un nombre (chrome, firefox, …).
+async fn ytm_auth_from_browser(browser: &str) -> Result<()> {
+    let data_dir = dirs::data_dir()
+        .ok_or_else(|| anyhow::anyhow!("no se pudo determinar el directorio de datos"))?
+        .join("shellmusic");
+    std::fs::create_dir_all(&data_dir)?;
+    let headers = match shellmusic::ytm::auth_from_browser(&data_dir, browser).await {
+        Ok(headers) => headers,
+        Err(err) => fatal(&format!("{err:#}"), 1),
+    };
+    let path = shellmusic::ytm::headers_path(&data_dir);
+    let text = serde_json::to_string_pretty(&headers)
+        .context("no se pudieron serializar los headers extraídos")?;
+    std::fs::write(&path, text).with_context(|| format!("no se pudo escribir {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    println!("Sesión de YouTube Music extraída del navegador y guardada en {}.", path.display());
     println!("Ahora: pip install ytmusicapi y [ytm] enabled = true en config.toml.");
     Ok(())
 }
@@ -669,6 +725,28 @@ mod tests {
         let flags = tui(&["--ytm-auth", "-t", "dracula"]);
         assert!(flags.ytm_auth);
         assert_eq!(flags.theme.as_deref(), Some("dracula"));
+    }
+
+    #[test]
+    fn ytm_auth_from_browser_flag() {
+        // Sin nombre: auto-detección; implica el alta de YouTube Music.
+        let flags = tui(&["--ytm-auth", "--from-browser"]);
+        assert!(flags.ytm_auth);
+        assert_eq!(flags.ytm_from_browser.as_deref(), Some("auto"));
+        // Con nombre (se normaliza a minúsculas); no hace falta --ytm-auth.
+        let flags = tui(&["--from-browser=FireFox"]);
+        assert!(flags.ytm_auth);
+        assert_eq!(flags.ytm_from_browser.as_deref(), Some("firefox"));
+        // Errores de valor.
+        let err = parse_args_from(args(&["--from-browser="])).unwrap_err();
+        assert!(err.contains("necesita un nombre"), "error: {err}");
+        let err = parse_args_from(args(&["--from-browser=fox fire!"])).unwrap_err();
+        assert!(err.contains("no válido"), "error: {err}");
+        let err = parse_args_from(args(&["--from-browsers"])).unwrap_err();
+        assert!(err.contains("argumento desconocido"), "error: {err}");
+        // No combina con los subcomandos headless.
+        let err = parse_args_from(args(&["--from-browser", "play", "x"])).unwrap_err();
+        assert!(err.contains("no se combinan"), "error: {err}");
     }
 
     #[test]

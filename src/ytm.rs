@@ -52,10 +52,35 @@ pub async fn run(data_dir: &Path, args: &[&str]) -> Result<Value> {
     run_with(None, data_dir, args).await
 }
 
+/// Extrae los headers de la sesión de YouTube Music desde las cookies del
+/// navegador (op `auth_browser`): "auto" prueba los soportados en orden;
+/// también acepta un nombre (chrome, firefox, …). Devuelve el dict de
+/// headers listo para guardar; requiere `pip install browser-cookie3`.
+pub async fn auth_from_browser(data_dir: &Path, browser: &str) -> Result<Value> {
+    run(data_dir, &["auth_browser", browser]).await
+}
+
+/// Verifica que los headers guardados se reconozcan y sirvan para auth de
+/// navegador (op `auth_check`): sin red, no necesita ytmusicapi.
+pub async fn auth_check(data_dir: &Path) -> Result<()> {
+    run(data_dir, &["auth_check"]).await.map(|_| ())
+}
+
 /// Ejecuta un comando del bridge. `SHELLMUSIC_YTM_PYTHON` redirige el
 /// intérprete (tests); `bridge` sustituye al script (tests con un puente de
 /// mentira que imprime JSON enlatado).
 async fn run_with(bridge: Option<&Path>, data_dir: &Path, args: &[&str]) -> Result<Value> {
+    run_full(bridge, data_dir, args, &[]).await
+}
+
+/// Ejecuta un comando del bridge con variables de entorno extra para el
+/// proceso python (tests inyectan un `browser_cookie3` de mentira).
+async fn run_full(
+    bridge: Option<&Path>,
+    data_dir: &Path,
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> Result<Value> {
     let embedded = ensure_bridge(data_dir)?;
     let bridge = bridge.unwrap_or(&embedded);
     let python = std::env::var("SHELLMUSIC_YTM_PYTHON").unwrap_or_else(|_| "python3".into());
@@ -67,6 +92,9 @@ async fn run_with(bridge: Option<&Path>, data_dir: &Path, args: &[&str]) -> Resu
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
     let output = tokio::time::timeout(TIMEOUT, command.output())
         .await
         .context("el puente de YouTube Music agotó el tiempo de espera")??;
@@ -220,6 +248,154 @@ else:
             err.to_string().contains("pip install ytmusicapi"),
             "error accionable: {err}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ejecuta el bridge real contra un dir temporal con los headers dados.
+    #[cfg(unix)]
+    async fn check_headers_text(text: &str) -> Result<()> {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-ytm-check-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(headers_path(&dir), text).unwrap();
+        let result = auth_check(&dir).await;
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    }
+
+    const COOKIE: &str = "__Secure-3PAPISID=zztop123; SAPISID=aa; SID=gg";
+
+    /// El puente entiende los cuatro formatos de copia del navegador y
+    /// completa origin/user-agent/authorization cuando faltan.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bridge_acepta_raw_curl_fetch_y_json() {
+        // Vista cruda de DevTools (con pseudo-cabeceras HTTP/2).
+        let raw = format!(
+            ":authority: music.youtube.com\n:method: POST\naccept: */*\n\
+             authorization: SAPISIDHASH 1760000000_deadbeef\ncontent-type: application/json\n\
+             cookie: {COOKIE}\norigin: https://music.youtube.com\n"
+        );
+        assert!(check_headers_text(&raw).await.is_ok(), "raw");
+
+        // «Copiar como cURL»: sin origin ni authorization (los sintetiza).
+        let curl = format!(
+            "curl 'https://music.youtube.com/youtubei/v1/browse?prettyPrint=false' \\\n  \
+             -H 'accept: */*' \\\n  -H 'content-type: application/json' \\\n  \
+             -H 'cookie: {COOKIE}' \\\n  --data-raw '{{}}' --compressed"
+        );
+        assert!(
+            check_headers_text(&curl).await.is_ok(),
+            "cURL debería pasar con la cookie sola"
+        );
+
+        // «Copiar como fetch»: solo el bloque headers; lo demás se descarta.
+        let fetch = format!(
+            "fetch(\"https://music.youtube.com/youtubei/v1/browse?prettyPrint=false\", {{\n  \
+             \"headers\": {{\n    \"accept\": \"*/*\",\n    \"content-type\": \"application/json\",\n    \
+             \"cookie\": \"{COOKIE}\"\n  }},\n  \"referrer\": \"https://music.youtube.com/\",\n  \
+             \"referrerPolicy\": \"strict-origin-when-cross-origin\",\n  \"body\": \"x\",\n  \
+             \"method\": \"POST\",\n  \"mode\": \"cors\",\n  \"credentials\": \"include\"\n}});"
+        );
+        assert!(check_headers_text(&fetch).await.is_ok(), "fetch");
+
+        // JSON mínimo: la cookie sola basta.
+        let json = format!("{{\"cookie\": \"{COOKIE}\"}}");
+        assert!(check_headers_text(&json).await.is_ok(), "json");
+    }
+
+    /// Sin cookie la verificación falla con error accionable.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bridge_rechaza_headers_sin_cookie() {
+        let err = check_headers_text("accept: */*").await.unwrap_err();
+        assert!(err.to_string().contains("cookie"), "error: {err}");
+    }
+
+    /// `auth_browser` con un browser_cookie3 de mentira inyectado por
+    /// PYTHONPATH: auto detecta la sesión, y los errores por navegador
+    /// nombrado son accionables. No necesita ytmusicapi ni red.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn auth_browser_extrae_sesion_del_navegador() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-ytm-auth-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        let module_dir = dir.join("fakebcj");
+        std::fs::create_dir_all(&module_dir).unwrap();
+        let fake = r#"import http.cookiejar as _jar
+
+def _cookie(name, value, domain):
+    return _jar.Cookie(
+        version=0, name=name, value=value, port=None, port_specified=False,
+        domain=domain, domain_specified=True, domain_initial_dot=domain.startswith("."),
+        path="/", path_specified=True, secure=True, expires=None, discard=True,
+        comment=None, comment_url=None, rest={}, rfc2109=False,
+    )
+
+def _jar_with(pairs):
+    jar = _jar.CookieJar()
+    for name, value, domain in pairs:
+        jar.set_cookie(_cookie(name, value, domain))
+    return jar
+
+_YT = [("__Secure-3PAPISID", "s3cr3t", ".youtube.com"),
+       ("SAPISID", "sapis", ".youtube.com"),
+       ("SID", "sid", ".youtube.com")]
+
+def chrome(domain_name=None):
+    return _jar_with(_YT)
+
+chromium = chrome
+brave = chrome
+
+def firefox(domain_name=None):
+    raise RuntimeError("simulado: sin keyring")
+
+def edge(domain_name=None):
+    return _jar_with([("session", "nada", ".example.com")])
+"#;
+        std::fs::write(module_dir.join("browser_cookie3.py"), fake).unwrap();
+        let env = [("PYTHONPATH", module_dir.to_str().unwrap())];
+
+        // Auto: salta firefox (falla) y edge (sin sesión), y usa chrome.
+        let headers = run_full(None, &dir, &["auth_browser", "auto"], &env)
+            .await
+            .unwrap();
+        assert!(
+            headers["cookie"]
+                .as_str()
+                .unwrap()
+                .contains("__Secure-3PAPISID=s3cr3t"),
+            "cookie: {headers}"
+        );
+        assert!(
+            headers["authorization"]
+                .as_str()
+                .unwrap()
+                .starts_with("SAPISIDHASH "),
+            "authorization: {headers}"
+        );
+        assert_eq!(headers["origin"].as_str().unwrap(), "https://music.youtube.com");
+        assert!(headers["user-agent"].as_str().unwrap().starts_with("Mozilla/5.0"));
+
+        // Nombrado con fallo de extracción: el error menciona el navegador.
+        let err = run_full(None, &dir, &["auth_browser", "firefox"], &env)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("firefox"), "error: {err}");
+
+        // Nombrado sin sesión de YouTube: error accionable.
+        let err = run_full(None, &dir, &["auth_browser", "edge"], &env)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("sin sesión"), "error: {err}");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
