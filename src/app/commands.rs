@@ -68,6 +68,16 @@ const COMMANDS: &[Command] = &[
         run: theme_set,
     },
     Command {
+        label: "ui <estilo>",
+        name: "ui",
+        run: ui_set,
+    },
+    Command {
+        label: "options",
+        name: "options",
+        run: options_open,
+    },
+    Command {
         label: "sleep <min|off|track>",
         name: "sleep",
         run: sleep_set,
@@ -210,20 +220,41 @@ fn vol_set(app: &mut App, player: &Arc<dyn Player>, tx: &mpsc::UnboundedSender<A
     change_volume(app, player, tx, delta);
 }
 
-/// `theme <nombre>`: aplica un preset empaquetado en caliente.
+/// `theme <nombre>`: aplica un preset o tema de usuario en caliente y lo
+/// guarda en `[theme]` de config.toml (RF-71).
 fn theme_set(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, arg: &str) {
-    match crate::theme::find_preset(arg) {
-        Some(preset) => {
-            app.theme = crate::theme::Theme::resolve(&preset).0;
-            app.message = Some(Message::info(format!("tema «{arg}» aplicado")));
-        }
+    if arg.trim().is_empty() {
+        app.message = Some(Message::info(format!(
+            "tema actual: «{}». Uso: theme <nombre>",
+            app.theme_name
+        )));
+        return;
+    }
+    super::options::apply_theme_and_save(app, arg);
+}
+
+/// `ui <estilo>`: fija el estilo de interfaz o, sin argumento, alterna entre
+/// classic y modern en caliente (RF-69); lo guarda en `[ui]` de config.toml.
+fn ui_set(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, arg: &str) {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        let style = app.ui_style.toggled();
+        super::options::set_style(app, style);
+        return;
+    }
+    match crate::config::UiStyle::from_name(arg) {
+        Some(style) => super::options::set_style(app, style),
         None => {
             app.message = Some(Message::error(format!(
-                "tema desconocido: «{arg}». Disponibles: {}",
-                crate::theme::preset_names().join(", ")
+                "estilo desconocido: «{arg}». Disponibles: classic, modern"
             )));
         }
     }
+}
+
+/// `options`: abre el menú de opciones (RF-70), lo mismo que la tecla F2.
+fn options_open(app: &mut App, _: &Arc<dyn Player>, _: &mpsc::UnboundedSender<AppMsg>, _: &str) {
+    super::options::open(app);
 }
 
 /// `sleep <arg>`: programa la parada. "off"/"0" lo cancela; "track" detiene
@@ -495,6 +526,10 @@ mod tests {
         assert_eq!(
             arg_for("theme dracula"),
             Some(("theme", "dracula".to_string()))
+        );
+        assert_eq!(
+            arg_for("ui modern"),
+            Some(("ui", "modern".to_string()))
         );
         assert_eq!(arg_for("inventado"), None);
     }

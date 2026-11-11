@@ -80,6 +80,9 @@ pub(super) fn handle_msg(
 ) {
     release_stale_control_pending(app);
     match msg {
+        // Las conmutaciones de integración las consume el run loop
+        // (donde vive `SystemIntegration`); aquí nunca llegan.
+        AppMsg::SetNotifications(_) | AppMsg::SetDiscord(_) => {}
         AppMsg::SearchDone(epoch, Ok(tracks)) => {
             // Resultado de una búsqueda anterior: no sobrescribe la actual.
             if epoch != app.search_epoch {

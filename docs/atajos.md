@@ -42,7 +42,7 @@ Mientras se edita la búsqueda, las teclas se capturan como texto; los controles
 | g / G | Listas (resultados, cola, favoritos, playlists) | Ir al inicio / al final |
 | / | Resultados / Cola / Favoritos | Foco a búsqueda; en Cola o Favoritos filtra la lista en vivo (Esc suelta el filtro) |
 | / | Favoritos / Contenido de playlist | Filtrar la lista en vivo: escribe y la lista se recorta (título/artista, sin distinguir mayúsculas); Enter opera sobre la lista filtrada, Esc suelta el filtro |
-| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~21 comandos (`pause`, `vol 80`, `theme dracula`, `sleep 15`, `sort title`, `ytm home`…) y Enter ejecuta el primero |
+| : | Resultados / Cola / Favoritos | Paleta de comandos: escribe para filtrar los ~24 comandos (`pause`, `vol 80`, `theme dracula`, `ui modern`, `sleep 15`, `sort title`, `ytm home`…) y Enter ejecuta el primero |
 | q | Resultados / Cola / Favoritos | Salir |
 | P | Resultados / Cola / Favoritos | Abrir gestor de playlists (overlay) |
 | A | Resultados / Cola / Favoritos | Añadir la pista seleccionada (o la que suena) a una playlist |
@@ -81,6 +81,13 @@ El tiempo restante se muestra en la barra del reproductor (`⏳mm:ss` o `⏳fin 
 
 - `: sort title` / `: sort artist` — ordenan el panel con el foco (Cola o Favoritos) por título o por artista, insensible a mayúsculas; la pista que suena conserva su lugar en la cola.
 - Dentro del contenido de una playlist: `s` ordena por título y `S` por artista (persistente).
+
+## Estilos, temas y opciones
+
+- **F2** — menú de opciones estilo btop: tres categorías (Apariencia, Reproducción, Integraciones) cuyas filas se cambian con `←`/`→` o Enter, aplicándose en caliente y guardándose en `config.toml` (conserva sus comentarios). `Tab` cambia de categoría; `Esc` cierra. Equivale a `: options`.
+- `: ui` — alterna el estilo de interfaz en caliente; `: ui classic|modern` lo fija. `classic` es el look original (bordes cuadrados, barra plana); `modern` añade el chrome inspirado en btop: bordes redondeados y barra de progreso con degradado. Lo elegido queda en `[ui] style`.
+- `: theme <nombre>` — aplica un preset o tema de usuario en caliente y guarda sus colores en `[theme]`. Los temas propios van en `~/.config/shellmusic/themes/<nombre>.toml` (detalle y colección en [Temas](temas.md)).
+- Lo que solo aplica al arrancar (proveedores, formato de audio, `[ytm]`/`[mcp]` enabled…) sigue editándose a mano en `config.toml`.
 
 ## Ratón
 

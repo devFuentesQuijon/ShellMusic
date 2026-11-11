@@ -38,10 +38,15 @@ pub(super) fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     horizontal
 }
 
-pub(super) fn block(title: String, accent: ratatui::style::Color) -> Block<'static> {
+pub(super) fn block(
+    title: String,
+    accent: ratatui::style::Color,
+    border: ratatui::widgets::BorderType,
+) -> Block<'static> {
     Block::bordered()
         .title(title)
         .border_style(Style::new().fg(accent))
+        .border_type(border)
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -57,7 +62,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect) {
         ListItem::new(format!("{} ({})", playlist.name, playlist.tracks.len()))
     }));
     let list = List::new(items)
-        .block(block("Playlists (P)".to_string(), app.theme.accent))
+        .block(block("Playlists (P)".to_string(), app.theme.accent, super::border_type(app.ui_style)))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_list_state);
@@ -105,7 +110,7 @@ fn draw_content(frame: &mut Frame, app: &mut App, area: Rect, target: crate::app
         })
         .collect();
     let list = List::new(items)
-        .block(block(title, app.theme.accent))
+        .block(block(title, app.theme.accent, super::border_type(app.ui_style)))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_content_state);
@@ -154,7 +159,7 @@ fn draw_name_input(frame: &mut Frame, app: &mut App, area: Rect, context: &NameC
         NameContext::WithTrack(track) => format!("Nueva playlist para: {}", track.title),
         NameContext::SaveQueue => format!("Guardar cola ({} pistas) como playlist", app.queue.len()),
     };
-    let input = Paragraph::new(app.overlay_input.as_str()).block(block(title, app.theme.accent));
+    let input = Paragraph::new(app.overlay_input.as_str()).block(block(title, app.theme.accent, super::border_type(app.ui_style)));
     frame.render_widget(input, area);
     let cursor_x = area.x + 1 + app.overlay_input.chars().count() as u16;
     frame.set_cursor_position((cursor_x.min(area.x + area.width.saturating_sub(2)), area.y + 1));
@@ -171,7 +176,7 @@ fn draw_pick(frame: &mut Frame, app: &mut App, area: Rect, track: &crate::provid
         .collect();
     items.push(ListItem::new("+ nueva playlist…"));
     let list = List::new(items)
-        .block(block(format!("Añadir a playlist: {}", track.title), app.theme.accent))
+        .block(block(format!("Añadir a playlist: {}", track.title), app.theme.accent, super::border_type(app.ui_style)))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_list_state);

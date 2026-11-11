@@ -34,6 +34,7 @@ pub fn draw_lyrics(frame: &mut Frame, app: &mut App) {
             .block(block(
                 format!("Letra: {}", app.lyrics_title),
                 app.theme.accent,
+                super::border_type(app.ui_style),
             ))
             .wrap(Wrap { trim: true })
             .scroll((app.lyrics_scroll, 0));
@@ -77,6 +78,7 @@ pub fn draw_lyrics(frame: &mut Frame, app: &mut App) {
         .block(block(
             format!("Letra: {} (sincronizada)", app.lyrics_title),
             app.theme.accent,
+            super::border_type(app.ui_style),
         ))
         .scroll((scroll, 0));
     frame.render_widget(paragraph, area);
@@ -100,7 +102,7 @@ pub fn draw_now_playing(frame: &mut Frame, app: &mut App) {
     let Some(track) = app.queue.current_track() else {
         frame.render_widget(
             Paragraph::new("Nada en reproducción")
-                .block(block("Sonando ahora".to_string(), accent)),
+                .block(block("Sonando ahora".to_string(), accent, super::border_type(app.ui_style))),
             area,
         );
         return;
@@ -139,7 +141,7 @@ pub fn draw_now_playing(frame: &mut Frame, app: &mut App) {
     ];
     frame.render_widget(
         Paragraph::new(lines.join("\n"))
-            .block(block("Sonando ahora".to_string(), accent))
+            .block(block("Sonando ahora".to_string(), accent, super::border_type(app.ui_style)))
             .wrap(Wrap { trim: false }),
         meta_area,
     );

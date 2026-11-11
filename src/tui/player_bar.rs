@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Gauge};
+use ratatui::widgets::Gauge;
 
 use super::fmt_duration;
 use crate::app::{App, SleepTimer};
@@ -98,12 +98,48 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             )
         }
     };
+    if app.ui_style == crate::config::UiStyle::Modern {
+        draw_modern(frame, app, area, ratio, &label);
+        return;
+    }
     let gauge = Gauge::default()
-        .block(Block::bordered().title("Reproductor"))
+        .block(super::panel_block(app, "Reproductor".to_string(), false))
         .gauge_style(Style::new().fg(app.theme.progress))
         .ratio(ratio)
         .label(label);
     frame.render_widget(gauge, area);
+}
+
+/// Barra del estilo moderno (RF-69): «█» con degradado progress→accent para
+/// lo sonado y «░» en muted para lo que falta; la etiqueta se superpone
+/// centrada, como hace `Gauge`.
+fn draw_modern(frame: &mut Frame, app: &App, area: Rect, ratio: f64, label: &str) {
+    let block = super::panel_block(app, "Reproductor".to_string(), false);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let width = inner.width as usize;
+    let filled = (ratio * width as f64).round() as usize;
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(super::gradient_bar(
+            width,
+            filled,
+            app.theme.progress,
+            app.theme.accent,
+            app.theme.muted,
+        )),
+        inner,
+    );
+    let label_width = label.chars().count() as u16;
+    let label_area = Rect {
+        x: inner.x + inner.width.saturating_sub(label_width) / 2,
+        y: inner.y,
+        width: label_width.min(inner.width),
+        height: 1,
+    };
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(label.to_string()),
+        label_area,
+    );
 }
 
 /// Corta `text` a `max` caracteres añadiendo '…' si sobra.

@@ -27,7 +27,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         app.stats.entries.len(),
         app.stats.top_artists().len()
     );
-    let block_widget = block(header, accent);
+    let block_widget = block(header, accent, super::border_type(app.ui_style));
 
     if app.stats.entries.is_empty() {
         frame.render_widget(
@@ -100,7 +100,7 @@ pub fn draw_export(frame: &mut Frame, app: &mut App) {
         ListItem::new("Solo favoritos (JSON)"),
     ];
     let list = List::new(items)
-        .block(block("Exportar".to_string(), app.theme.accent))
+        .block(block("Exportar".to_string(), app.theme.accent, super::border_type(app.ui_style)))
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
     frame.render_stateful_widget(list, area, &mut app.overlay_list_state);
@@ -132,7 +132,7 @@ pub fn draw_path_input(frame: &mut Frame, app: &mut App) {
         crate::app::PathAction::Import => "Importar desde (.json / .m3u):".to_string(),
     };
     let input = Paragraph::new(app.overlay_input.as_str())
-        .block(block(title, app.theme.accent));
+        .block(block(title, app.theme.accent, super::border_type(app.ui_style)));
     frame.render_widget(input, area);
     let cursor_x = area.x + 1 + app.overlay_input.chars().count() as u16;
     frame.set_cursor_position((cursor_x.min(area.x + area.width.saturating_sub(2)), area.y + 1));

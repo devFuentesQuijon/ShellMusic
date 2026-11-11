@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph};
 
 use super::fmt_duration;
 use crate::app::{App, Focus};
@@ -15,11 +15,7 @@ pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         format!("Buscar en {provider} (/ para enfocar)")
     };
-    let border_style = if focused {
-        Style::new().fg(app.theme.accent)
-    } else {
-        Style::default()
-    };
+    let block = super::panel_block(app, title, focused);
     let input = Paragraph::new(Line::from({
         let mut spans = vec![Span::raw(app.input.as_str())];
         // Ghost text: autocompletado desde el historial (→ acepta).
@@ -31,7 +27,7 @@ pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         }
         spans
     }))
-    .block(Block::bordered().title(title).border_style(border_style));
+    .block(block);
     frame.render_widget(input, area);
     if focused {
         let cursor_x = area.x + 1 + app.input.chars().count() as u16;
@@ -41,17 +37,12 @@ pub fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 pub fn draw_results(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Browsing;
-    let border_style = if focused {
-        Style::new().fg(app.theme.accent)
-    } else {
-        Style::default()
-    };
     let title = if app.searching {
         "Resultados (buscando…)".to_string()
     } else {
         format!("Resultados ({})", app.results.len())
     };
-    let block = Block::bordered().title(title).border_style(border_style);
+    let block = super::panel_block(app, title, focused);
     if app.results.is_empty() {
         let hint = if app.searching {
             "Buscando…"

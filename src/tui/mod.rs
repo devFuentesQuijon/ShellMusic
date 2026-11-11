@@ -2,6 +2,7 @@ pub mod command;
 pub mod favorites;
 pub mod help;
 pub mod nowplaying;
+pub mod options;
 pub mod player_bar;
 pub mod playlists;
 pub mod queue;
@@ -12,10 +13,12 @@ use std::time::Duration;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::Style;
-use ratatui::widgets::Paragraph;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 
 use crate::app::{App, Focus, Overlay};
+use crate::config::UiStyle;
 
 const HELP_SEARCH: &str = "Enter buscar · Tab panel · Esc resultados · Ctrl+C salir";
 const HELP_RESULTS: &str = "Enter reproducir · a cola · f favorito · o artista · y copiar · ←/→ seek · 0-9 % · l repetir · ? ayuda · q salir";
@@ -58,6 +61,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     playlists::draw(frame, app);
     help::draw(frame, app);
     command::draw(frame, app);
+    options::draw(frame, app);
     stats::draw(frame, app);
     stats::draw_export(frame, app);
     stats::draw_path_input(frame, app);
@@ -85,6 +89,7 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     "exportar/importar: Enter confirmar · Esc cancelar"
                 }
                 Overlay::Command => "comandos: Enter ejecutar · Esc cerrar",
+                Overlay::Options => "opciones: ←/→ cambiar · Tab categoría · Esc cerrar",
                 _ => "playlists: las teclas se muestran dentro del panel",
             }
             .to_string(),
@@ -94,6 +99,123 @@ fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_widget(Paragraph::new(text).style(style), area);
 }
 
+/// Tipo de borde según el estilo UI (RF-69): redondeado en el moderno
+/// (inspirado en btop), cuadrado en el clásico.
+pub(super) fn border_type(style: UiStyle) -> BorderType {
+    match style {
+        UiStyle::Classic => BorderType::Plain,
+        UiStyle::Modern => BorderType::Rounded,
+    }
+}
+
+/// Bloque estándar de panel: título, borde resaltado con el foco y tipo de
+/// borde según el estilo UI.
+pub(super) fn panel_block(app: &App, title: String, focused: bool) -> Block<'static> {
+    let border_style = if focused {
+        Style::new().fg(app.theme.accent)
+    } else {
+        Style::default()
+    };
+    Block::bordered()
+        .title(title)
+        .border_style(border_style)
+        .border_type(border_type(app.ui_style))
+}
+
+/// RGB aproximado de un `Color` de ratatui (base de los degradados): los
+/// nombres usan la tabla ANSI y los índices la paleta xterm-256.
+pub(super) fn color_to_rgb(color: Color) -> (u8, u8, u8) {
+    match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Indexed(i) => indexed_to_rgb(i),
+        Color::Black => (0, 0, 0),
+        Color::Red => (205, 0, 0),
+        Color::Green => (0, 205, 0),
+        Color::Yellow => (205, 205, 0),
+        Color::Blue => (0, 0, 238),
+        Color::Magenta => (205, 0, 205),
+        Color::Cyan => (0, 205, 205),
+        Color::Gray => (229, 229, 229),
+        Color::DarkGray => (127, 127, 127),
+        Color::LightRed => (255, 0, 0),
+        Color::LightGreen => (0, 255, 0),
+        Color::LightYellow => (255, 255, 0),
+        Color::LightBlue => (92, 92, 255),
+        Color::LightMagenta => (255, 0, 255),
+        Color::LightCyan => (0, 255, 255),
+        Color::White => (255, 255, 255),
+        Color::Reset => (128, 128, 128),
+    }
+}
+
+fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
+    const ANSI16: [(u8, u8, u8); 16] = [
+        (0, 0, 0),
+        (205, 0, 0),
+        (0, 205, 0),
+        (205, 205, 0),
+        (0, 0, 238),
+        (205, 0, 205),
+        (0, 205, 205),
+        (229, 229, 229),
+        (127, 127, 127),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (92, 92, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
+    ];
+    match i {
+        0..=15 => ANSI16[i as usize],
+        // Cubo 6×6×6: niveles 0-5 escalados a 0-255 en pasos de 51.
+        16..=231 => {
+            let n = i - 16;
+            ((n / 36) * 51, ((n % 36) / 6) * 51, (n % 6) * 51)
+        }
+        // Escala de grises: 232 = #080808, +10 por paso.
+        232..=255 => {
+            let v = 8 + (i - 232) * 10;
+            (v, v, v)
+        }
+    }
+}
+
+/// Interpola dos colores en `t` (0.0-1.0) para los degradados del estilo
+/// moderno.
+pub(super) fn lerp_color(from: Color, to: Color, t: f32) -> Color {
+    let (fr, fg, fb) = color_to_rgb(from);
+    let (tr, tg, tb) = color_to_rgb(to);
+    let lerp = |a: u8, b: u8| {
+        (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)).round() as u8
+    };
+    Color::Rgb(lerp(fr, tr), lerp(fg, tg), lerp(fb, tb))
+}
+
+/// Línea de barra con degradado (estilo moderno): las primeras `filled`
+/// celdas son «█» del degradado `from`→`to` y el resto «░» en `empty`.
+pub(super) fn gradient_bar(
+    width: usize,
+    filled: usize,
+    from: Color,
+    to: Color,
+    empty: Color,
+) -> Line<'static> {
+    let width = width.max(1);
+    let spans: Vec<Span> = (0..width)
+        .map(|i| {
+            if i < filled {
+                let t = i as f32 / (width - 1).max(1) as f32;
+                Span::styled("█", Style::new().fg(lerp_color(from, to, t)))
+            } else {
+                Span::styled("░", Style::new().fg(empty))
+            }
+        })
+        .collect();
+    Line::from(spans)
+}
+
 pub fn fmt_duration(duration: Option<Duration>) -> String {
     match duration {
         Some(d) => {
@@ -101,5 +223,49 @@ pub fn fmt_duration(duration: Option<Duration>) -> String {
             format!("{}:{:02}", secs / 60, secs % 60)
         }
         None => "--:--".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_to_rgb_covers_names_and_palette() {
+        assert_eq!(color_to_rgb(Color::Rgb(1, 2, 3)), (1, 2, 3));
+        assert_eq!(color_to_rgb(Color::Red), (205, 0, 0));
+        assert_eq!(color_to_rgb(Color::DarkGray), (127, 127, 127));
+        // xterm-256: 196 = rojo del cubo (5,0,0) · 51.
+        assert_eq!(color_to_rgb(Color::Indexed(196)), (255, 0, 0));
+        // Escala de grises: 232 = 8, 255 = 238.
+        assert_eq!(color_to_rgb(Color::Indexed(232)), (8, 8, 8));
+        assert_eq!(color_to_rgb(Color::Indexed(255)), (238, 238, 238));
+    }
+
+    #[test]
+    fn lerp_interpolates_and_clamps() {
+        let from = Color::Rgb(0, 0, 0);
+        let to = Color::Rgb(100, 200, 50);
+        assert_eq!(lerp_color(from, to, 0.0), Color::Rgb(0, 0, 0));
+        assert_eq!(lerp_color(from, to, 1.0), Color::Rgb(100, 200, 50));
+        assert_eq!(lerp_color(from, to, 0.5), Color::Rgb(50, 100, 25));
+        assert_eq!(lerp_color(from, to, 2.0), to, "se satura");
+        assert_eq!(lerp_color(from, to, -1.0), from, "y por abajo");
+    }
+
+    #[test]
+    fn gradient_bar_marks_filled_cells() {
+        let line = gradient_bar(10, 4, Color::Black, Color::White, Color::DarkGray);
+        assert_eq!(line.spans.len(), 10);
+        for (i, span) in line.spans.iter().enumerate() {
+            let expected: &str = if i < 4 { "█" } else { "░" };
+            assert_eq!(span.content.as_ref(), expected);
+        }
+    }
+
+    #[test]
+    fn border_type_follows_ui_style() {
+        assert_eq!(border_type(UiStyle::Classic), BorderType::Plain);
+        assert_eq!(border_type(UiStyle::Modern), BorderType::Rounded);
     }
 }

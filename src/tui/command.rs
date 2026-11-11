@@ -21,7 +21,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         height: 3,
     };
     let input = Paragraph::new(format!(":{}", app.overlay_input))
-        .block(block("Comandos".to_string(), app.theme.accent));
+        .block(block("Comandos".to_string(), app.theme.accent, super::border_type(app.ui_style)));
     frame.render_widget(input, input_area);
     let cursor_x = area.x + 2 + app.overlay_input.chars().count() as u16;
     frame.set_cursor_position((

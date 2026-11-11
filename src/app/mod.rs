@@ -18,6 +18,7 @@ use crate::tui;
 pub(crate) mod commands;
 mod control;
 mod input;
+pub(crate) mod options;
 mod playback;
 mod state;
 
@@ -52,6 +53,10 @@ pub(super) enum AppMsg {
     SponsorBlockDone((ProviderKind, String), Result<Vec<crate::sponsorblock::Segment>, String>),
     /// Respuesta del puente de YouTube Music (RF-68) para la operación dada.
     YtmDone(YtmOp, Result<serde_json::Value, String>),
+    /// Conmuta notificaciones/presencia (RF-70, menú de opciones): se aplican
+    /// sobre `SystemIntegration`, que vive en el run loop.
+    SetNotifications(bool),
+    SetDiscord(bool),
 }
 
 /// Operación del puente YouTube Music cuyo resultado llega en `AppMsg::YtmDone`.
@@ -257,7 +262,19 @@ pub async fn run(
                 }
             }
             Some(msg) = rx.recv() => {
-                handle_msg(&mut app, msg, &player, &tx);
+                match msg {
+                    AppMsg::SetNotifications(on) => {
+                        system.set_notifications(on);
+                        app.notify_enabled = on;
+                    }
+                    AppMsg::SetDiscord(on) => {
+                        if let Some(warning) = system.set_discord(on) {
+                            app.message = Some(Message::info(warning));
+                        }
+                        app.discord_enabled = on;
+                    }
+                    other => handle_msg(&mut app, other, &player, &tx),
+                }
                 needs_redraw = true;
             }
             Some(command) = media_rx.recv() => {

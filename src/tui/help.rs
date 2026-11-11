@@ -71,6 +71,7 @@ const SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("g / G", "inicio / fin de la lista"),
             ("/", "foco a búsqueda"),
             (":", "paleta de comandos"),
+            ("F2", "menú de opciones (estilo UI, tema, integraciones)"),
             ("m", "cambiar proveedor"),
             ("r / R", "radio on/off · sub-modo"),
             ("P", "gestor de playlists"),
@@ -116,6 +117,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Paragraph::new(lines).block(block(
             "Ayuda — atajos de teclado".to_string(),
             app.theme.accent,
+            super::border_type(app.ui_style),
         )),
         area,
     );

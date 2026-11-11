@@ -22,7 +22,7 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 - **Integración con el sistema**: notificaciones de escritorio **con carátula**, MPRIS en Linux (teclas multimedia, widgets, KDE Connect), **presencia en Discord** y **scrobbling Last.fm** (`smusic --lastfm-auth`).
 - **Agentes de IA**: socket de control local opt-in (`[mcp] enabled`) y puente **MCP** (`smusic-mcp`): busca, reproduce y gestiona la cola desde Claude Code y otros agentes ([docs/mcp.md](docs/mcp.md)).
 - **Tu cuenta de YouTube Music** (opt-in, `[ytm]`): alta con un comando (`smusic --ytm-auth --from-browser`, sin DevTools) o pegando los headers; importa tus likes y playlists, carga tus recomendaciones (`: ytm home`) y radio personalizada (`: ytm radio`); la tecla `f` también da like en tu cuenta. **SponsorBlock** opt-in salta segmentos sponsor/intro/outro automáticamente.
-- **Temas de color** configurables y **título de pestaña** con la pista en reproducción.
+- **A tu manera**: dos **estilos de interfaz** con cambio en caliente (`: ui`: clásico o moderno con bordes redondeados y barra degradada, inspirado en btop), **menú de opciones en la TUI** (F2: tema, ratón, radio, integraciones — aplican y guardan al instante) y **temas de color** configurables, con presets empaquetados, colección extra y temas propios en `~/.config/shellmusic/themes/`. **Título de pestaña** con la pista en reproducción.
 - **Robusta**: defensas anti-bot de YouTube en cadena (rotación de clientes, cookies, PO Token), auto-respawn de mpv y reintentos ante fallos transitorios.
 - **Interfaz a tu manera**: **ratón** (click en la barra = seek, rueda = volumen), **paleta de comandos** con `:` (`vol 80`, `theme dracula`…) y atajos descubribles con `?`.
 

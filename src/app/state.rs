@@ -232,6 +232,9 @@ pub enum Overlay {
     PathInput(PathAction),
     /// Paleta de comandos (`:`): ejecuta acciones escribiendo su nombre.
     Command,
+    /// Menú de opciones en la TUI (RF-70, F2): configura la app en caliente
+    /// y persiste en config.toml conservando sus comentarios.
+    Options,
 }
 
 /// Destino del overlay de contenido de playlist (RF-65): una playlist
@@ -502,6 +505,26 @@ pub struct App {
     pub ytm_like_writeback: bool,
     /// Hay una operación del puente YTM en curso (una a la vez).
     pub ytm_busy: bool,
+    /// Estilo de interfaz (`[ui]`, RF-69); cambiable en caliente (`: ui`, F2).
+    pub ui_style: crate::config::UiStyle,
+    /// Captura de ratón activa (espejo de `[general] mouse`); el menú F2 la
+    /// conmuta en caliente.
+    pub mouse: bool,
+    /// Espejos de `[integrations]` para el menú F2 (la fuente de verdad del
+    /// comportamiento es `SystemIntegration`; el run loop los sincroniza).
+    pub notify_enabled: bool,
+    pub discord_enabled: bool,
+    /// Nombre del tema vigente (preset, tema de usuario o "personalizado"
+    /// cuando los colores vienen sueltos de `[theme]`).
+    pub theme_name: String,
+    /// Categoría y fila seleccionadas del menú de opciones (RF-70).
+    pub options_tab: usize,
+    pub options_sel: ListState,
+    /// Temas disponibles en el menú (presets + de usuario), cargados al abrirlo.
+    pub options_themes: Vec<String>,
+    /// Ruta de config.toml usada por el menú para persistir cambios
+    /// (sobreescribible en tests para no tocar la config real).
+    pub config_path: std::path::PathBuf,
 }
 
 impl App {
@@ -660,6 +683,17 @@ impl App {
             ytm: config.ytm.enabled,
             ytm_like_writeback: config.ytm.like_writeback,
             ytm_busy: false,
+            ui_style: crate::config::UiStyle::from_name(&config.ui.style)
+                .unwrap_or_default(),
+            mouse: config.general.mouse,
+            notify_enabled: config.integrations.notifications,
+            discord_enabled: config.integrations.discord,
+            theme_name: "personalizado".to_string(),
+            options_tab: 0,
+            options_sel: ListState::default(),
+            options_themes: Vec::new(),
+            config_path: Config::path()
+                .unwrap_or_else(|_| data_dir.join("config.toml")),
         };
         if !app.favorites.tracks.is_empty() {
             app.favorites_state.select(Some(0));

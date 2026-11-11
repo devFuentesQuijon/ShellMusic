@@ -9,6 +9,9 @@ providers = ["youtube", "soundcloud", "bandcamp"]   # proveedores habilitados; l
 default_provider = "youtube"            # proveedor activo al arrancar (debe estar en la lista)
 mouse = true                # ratón: click en la barra = seek · rueda = volumen · click en panel = foco (false deja la selección de texto del terminal)
 
+[ui]
+style = "classic"    # classic | modern — modern: bordes redondeados y barra de progreso con degradado; se cambia en caliente con «: ui» o el menú F2
+
 [audio]
 initial_volume = 70       # 0-100
 format = ""               # selector de formato de yt-dlp (mpv --ytdl-format): "bestaudio", "worst", "bestaudio[abr<=128]", ...; "" = criterio por defecto de yt-dlp
@@ -73,7 +76,7 @@ like_writeback = true   # la tecla f también da/quita like en YouTube Music
 
 La pestaña del terminal muestra «ShellMusic» en reposo y «♪ artista — título · ShellMusic» mientras suena una pista; al salir se restablece el título habitual del terminal.
 
-Los colores de la interfaz se configuran en `[theme]` (tabla de arriba). Cambios recientes de tema se aplican al reiniciar la app.
+Los colores de la interfaz se configuran en `[theme]` (tabla de arriba) y se cambian en caliente con `: theme <nombre>` (aplica y guarda) o el menú F2. Los presets empaquetados y los temas propios de `~/.config/shellmusic/themes/*.toml` se listan en [Temas](temas.md). El estilo de interfaz (`[ui] style`, classic/modern) también es conmutable en caliente (`: ui`).
 
 ## Caché de búsquedas
 

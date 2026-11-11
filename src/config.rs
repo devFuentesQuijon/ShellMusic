@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
@@ -12,6 +12,9 @@ results_per_search = 15   # 1-50
 providers = [\"youtube\", \"soundcloud\", \"bandcamp\"]   # proveedores habilitados; la tecla m cicla entre ellos
 default_provider = \"youtube\"              # proveedor activo al arrancar (debe estar en la lista)
 mouse = true                # ratón: click en la barra = seek · rueda = volumen · click en panel = foco (false deja la selección de texto del terminal)
+
+[ui]
+style = \"classic\"    # classic | modern — modern: bordes redondeados y barra de progreso con degradado
 
 [audio]
 initial_volume = 70       # 0-100
@@ -66,6 +69,7 @@ like_writeback = true   # la tecla f también da/quita like en YouTube Music
 #[serde(default)]
 pub struct Config {
     pub general: General,
+    pub ui: UiConfig,
     pub audio: Audio,
     pub youtube: Youtube,
     pub cache: Cache,
@@ -76,6 +80,59 @@ pub struct Config {
     pub mcp: Mcp,
     pub sponsorblock: Sponsorblock,
     pub ytm: Ytm,
+}
+
+/// Estilo de interfaz (`[ui]`, RF-69): el «moderno» es el chrome inspirado en
+/// btop (bordes redondeados y barra con degradado); el «clásico» es el look
+/// original. Cambiable en caliente con `: ui` o el menú F2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UiStyle {
+    /// Look original: bordes cuadrados y barra de progreso plana.
+    #[default]
+    Classic,
+    /// Chrome inspirado en btop: bordes redondeados y degradados.
+    Modern,
+}
+
+impl UiStyle {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_lowercase().as_str() {
+            "classic" | "clasico" | "clásico" => Some(Self::Classic),
+            "modern" | "moderno" => Some(Self::Modern),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Modern => "modern",
+        }
+    }
+
+    /// El otro estilo (para `: ui` sin argumento, que alterna).
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Classic => Self::Modern,
+            Self::Modern => Self::Classic,
+        }
+    }
+}
+
+/// Sección `[ui]`: apariencia de la TUI.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct UiConfig {
+    /// "classic" | "modern" (se valida en `Config::load`).
+    pub style: String,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            style: "classic".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -335,5 +392,223 @@ impl Config {
             .categories
             .retain(|category| !category.trim().is_empty());
         Ok(config)
+    }
+
+    /// Persiste cambios sueltos conservando los comentarios del archivo (la
+    /// serialización TOML completa los perdería). Cada entrada es
+    /// "seccion.clave" con un valor escalar; si la clave o la sección no
+    /// existen, se añaden (RF-70, menú de opciones y `: ui`/`: theme`).
+    pub fn update(entries: &[(String, toml::Value)]) -> Result<()> {
+        Self::update_at(&Self::path()?, entries)
+    }
+
+    /// Versión con ruta explícita (tests; ver `update`).
+    pub fn update_at(path: &Path, entries: &[(String, toml::Value)]) -> Result<()> {
+        let text = if path.exists() {
+            fs::read_to_string(path).with_context(|| format!("no se pudo leer {}", path.display()))?
+        } else {
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir)
+                    .with_context(|| format!("no se pudo crear {}", dir.display()))?;
+            }
+            fs::write(path, DEFAULT_TOML)
+                .with_context(|| format!("no se pudo escribir {}", path.display()))?;
+            DEFAULT_TOML.to_string()
+        };
+        let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+        for (entry, value) in entries {
+            let (section, key) = entry
+                .split_once('.')
+                .ok_or_else(|| anyhow!("clave de config sin sección: {entry:?}"))?;
+            set_line(&mut lines, section.trim(), key.trim(), &value.to_string());
+        }
+        fs::write(path, lines.join("\n") + "\n")
+            .with_context(|| format!("no se pudo escribir {}", path.display()))
+    }
+}
+
+/// Sustituye (o inserta) `key = literal` en la sección dada de `lines`,
+/// conservando el resto del archivo tal cual.
+fn set_line(lines: &mut Vec<String>, section: &str, key: &str, literal: &str) {
+    let mut current = String::new();
+    let mut section_end: Option<usize> = None;
+    let mut hit: Option<(usize, String)> = None;
+    for (i, raw) in lines.iter().enumerate() {
+        let trimmed = raw.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            current = trimmed.trim_matches(|c| c == '[' || c == ']').trim().to_string();
+            if current == section {
+                section_end = Some(i + 1);
+            }
+            continue;
+        }
+        if current == section && hit.is_none() && raw.contains('=') {
+            let (raw_key, _) = raw.split_once('=').expect("contain '='");
+            if raw_key.trim() == key {
+                hit = Some((i, replace_value(raw, literal)));
+            } else {
+                section_end = Some(i + 1);
+            }
+        }
+    }
+    if let Some((index, line)) = hit {
+        lines[index] = line;
+        return;
+    }
+    let line = format!("{key} = {literal}");
+    match section_end {
+        Some(at) => lines.insert(at, line),
+        None => {
+            lines.push(format!("[{section}]"));
+            lines.push(line);
+        }
+    }
+}
+
+/// Sustituye el valor de «clave = valor   # comentario» conservando la
+/// clave, la indentación, el hueco y el comentario final. El comentario es
+/// el último «#…» de la línea; los valores que se editan por menú (bool,
+/// entero, enum) nunca contienen «#» en su representación.
+fn replace_value(line: &str, literal: &str) -> String {
+    let Some((before, after)) = line.split_once('=') else {
+        return line.to_string();
+    };
+    let comment = after
+        .rfind('#')
+        .map(|at| {
+            let head = &after[..at];
+            let gap = head.len() - head.trim_end().len();
+            &after[head.len() - gap..]
+        })
+        .unwrap_or("");
+    format!("{before}= {literal}{comment}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "shellmusic-config-{}-{}-{:016x}.toml",
+            tag,
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ))
+    }
+
+    const SAMPLE: &str = "\
+[general]
+results_per_search = 15   # 1-50
+mouse = true                # ratón: click en la barra = seek
+
+[ui]
+style = \"classic\"    # classic | modern
+
+[theme]
+accent = \"cyan\"        # bordes del panel enfocado
+";
+
+    #[test]
+    fn ui_style_from_name_accepts_aliases() {
+        assert_eq!(UiStyle::from_name("classic"), Some(UiStyle::Classic));
+        assert_eq!(UiStyle::from_name("CLÁSICO"), Some(UiStyle::Classic));
+        assert_eq!(UiStyle::from_name("modern"), Some(UiStyle::Modern));
+        assert_eq!(UiStyle::from_name(" Moderno "), Some(UiStyle::Modern));
+        assert_eq!(UiStyle::from_name("raro"), None);
+        assert_eq!(UiStyle::Classic.toggled(), UiStyle::Modern);
+        assert_eq!(UiStyle::Modern.toggled(), UiStyle::Classic);
+        assert_eq!(UiStyle::Modern.name(), "modern");
+    }
+
+    #[test]
+    fn update_replaces_value_and_keeps_comment() {
+        let path = temp_path("replace");
+        fs::write(&path, SAMPLE).unwrap();
+        Config::update_at(
+            &path,
+            &[("ui.style".to_string(), "modern".into())],
+        )
+        .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("style = \"modern\"    # classic | modern"),
+            "se conserva el comentario:\n{text}"
+        );
+        let config: Config = toml::from_str(&text).unwrap();
+        assert_eq!(config.ui.style, "modern");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn update_bool_and_number_roundtrip() {
+        let path = temp_path("scalars");
+        fs::write(&path, SAMPLE).unwrap();
+        Config::update_at(
+            &path,
+            &[
+                ("general.mouse".to_string(), false.into()),
+                ("general.results_per_search".to_string(), 20.into()),
+            ],
+        )
+        .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("mouse = false"), "texto:\n{text}");
+        assert!(text.contains("results_per_search = 20   # 1-50"), "texto:\n{text}");
+        let config: Config = toml::from_str(&text).unwrap();
+        assert!(!config.general.mouse);
+        assert_eq!(config.general.results_per_search, 20);
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn update_inserts_missing_key_inside_section() {
+        let path = temp_path("insert-key");
+        let sample = "[theme]\naccent = \"cyan\"\n\n[other]\nx = 1\n";
+        fs::write(&path, sample).unwrap();
+        Config::update_at(
+            &path,
+            &[("theme.progress".to_string(), "#00ff00".into())],
+        )
+        .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let theme = text.split("[other]").next().unwrap();
+        assert!(theme.contains("accent = \"cyan\""), "tema:\n{theme}");
+        assert!(
+            theme.contains("progress = \"#00ff00\""),
+            "la clave nueva va en su sección:\n{theme}"
+        );
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn update_appends_missing_section_at_end() {
+        let path = temp_path("insert-section");
+        fs::write(&path, SAMPLE).unwrap();
+        Config::update_at(
+            &path,
+            &[("audio.gapless".to_string(), true.into())],
+        )
+        .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let pos_section = text.find("[audio]").expect("sección añadida");
+        let pos_key = text.find("gapless = true").expect("clave añadida");
+        assert!(pos_key > pos_section);
+        let config: Config = toml::from_str(&text).unwrap();
+        assert!(config.audio.gapless);
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn update_creates_file_from_default_template() {
+        let path = temp_path("create");
+        Config::update_at(&path, &[("ui.style".to_string(), "modern".into())]).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[general]"), "plantilla por defecto");
+        assert!(text.contains("style = \"modern\""));
+        let config: Config = toml::from_str(&text).unwrap();
+        assert_eq!(config.ui.style, "modern");
+        assert_eq!(config.general.results_per_search, 15);
+        fs::remove_file(&path).ok();
     }
 }

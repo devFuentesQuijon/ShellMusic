@@ -38,6 +38,9 @@ pub struct SystemIntegration {
     controls: Option<MediaControls>,
     /// Presencia en Discord: se alimenta en `update` con cambios de pista.
     discord: Option<crate::discord::PresenceSender>,
+    /// Application ID usado para la presencia (el del config o el embebido):
+    /// se guarda para re-spawnear al conmutar la integración en caliente.
+    discord_client_id: String,
     /// Última pista publicada (para no repetir metadata/notificación).
     last_track: Option<(ProviderKind, String)>,
     last_paused: bool,
@@ -92,6 +95,7 @@ impl SystemIntegration {
             notifications: config.notifications,
             controls,
             discord,
+            discord_client_id: config.discord_client_id.clone(),
             last_track: None,
             last_paused: false,
             notification_id: None,
@@ -109,9 +113,34 @@ impl SystemIntegration {
         Self {
             notifications: config.notifications,
             discord,
+            discord_client_id: config.discord_client_id.clone(),
             last_track: None,
             last_paused: false,
             startup_warning: discord_warning,
+        }
+    }
+
+    /// Conmuta las notificaciones de escritorio (menú de opciones, RF-70).
+    pub fn set_notifications(&mut self, on: bool) {
+        self.notifications = on;
+    }
+
+    /// Conmuta la presencia en Discord en caliente: encender re-spawnea la
+    /// tarea con el Application ID configurado; apagar suelta el sender (la
+    /// tarea termina al cerrarse el canal). Devuelve aviso si no pudo.
+    pub fn set_discord(&mut self, on: bool) -> Option<String> {
+        match (on, self.discord.is_some()) {
+            (true, false) => {
+                let (sender, warning) =
+                    crate::discord::spawn(true, &self.discord_client_id);
+                self.discord = sender;
+                warning
+            }
+            (false, true) => {
+                self.discord = None;
+                None
+            }
+            _ => None,
         }
     }
 

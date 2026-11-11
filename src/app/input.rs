@@ -34,6 +34,11 @@ pub(super) fn handle_mouse(
     player: &Arc<dyn Player>,
     tx: &mpsc::UnboundedSender<AppMsg>,
 ) -> bool {
+    // La captura puede apagarse en caliente desde el menú de opciones (RF-70);
+    // aunque el terminal aún envíe algún evento, se ignoran.
+    if !app.mouse {
+        return false;
+    }
     if !matches!(app.overlay, Overlay::Closed) {
         return false;
     }
@@ -137,6 +142,11 @@ pub(super) fn handle_key(
 ) {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         app.should_quit = true;
+        return;
+    }
+    // F2 abre el menú de opciones (RF-70) desde cualquier foco, como en btop.
+    if key.code == KeyCode::F(2) {
+        super::options::open(app);
         return;
     }
     // El overlay de playlists es modal: captura todas las teclas salvo Ctrl+C.
@@ -684,6 +694,7 @@ fn handle_overlay_key(
         Overlay::Export => overlay_export_key(app, key),
         Overlay::PathInput(action) => overlay_path_key(app, key, &action),
         Overlay::Command => overlay_command_key(app, key, player, tx),
+        Overlay::Options => super::options::handle_key(app, key, tx),
         Overlay::Lyrics => overlay_lyrics_key(app, key),
         Overlay::NowPlaying => match key.code {
             KeyCode::Esc | KeyCode::Char('i') => app.overlay = Overlay::Closed,

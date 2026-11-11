@@ -1,8 +1,22 @@
 # Temas: colección Halloween 🎃
 
-Siete temas listos para probar inspirados en los monstruos clásicos. Para usar uno, edita `config.toml` (ruta en [Configuración](configuracion.md)), sustituye la sección `[theme]` por el bloque del tema y reinicia `smusic`.
+Siete temas listos para probar inspirados en los monstruos clásicos. Para usar uno no hace falta editar nada: `: theme dracula` (o el nombre que sea) en la paleta lo aplica en caliente y lo guarda en `config.toml`. También se eligen desde el menú de opciones (F2) y, clásicamente, copiando el bloque en `[theme]` de `config.toml` y reiniciando.
 
 Los colores aceptan nombres, hex (`#rrggbb`) e índices de paleta; estos temas usan hex para fidelidad. Pensados para fondos de terminal oscuros.
+
+## Temas propios
+
+Cualquiera puede crear temas sueltos en `~/.config/shellmusic/themes/<nombre>.toml` (un archivo por tema, con los mismos campos de `[theme]`):
+
+```toml
+accent = "#fab387"
+highlight = "#f9e2af"
+error = "#f38ba8"
+muted = "#6c7086"
+progress = "#a6e3a1"
+```
+
+Aparecen junto a los presets en `: theme <nombre>` y en el selector del menú F2 (los presets ganan ante un usuario homónimo). Un archivo que no parsea se ignora con un aviso en la línea de estado; no rompe los demás.
 
 ## Dracula
 

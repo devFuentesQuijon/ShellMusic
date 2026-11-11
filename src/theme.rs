@@ -144,6 +144,81 @@ pub fn find_preset(name: &str) -> Option<ThemeConfig> {
         .map(|(_, preset)| (*preset).into_config())
 }
 
+/// Directorio de temas del usuario (RF-71): `<config_dir>/shellmusic/themes`.
+pub fn user_themes_dir() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("shellmusic").join("themes"))
+}
+
+/// Carga los temas de usuario (`<nombre>.toml` con los campos de
+/// [`ThemeConfig`]). Los archivos que no parsean se reportan como avisos
+/// (ruta + causa) y no impiden cargar el resto.
+pub fn load_user_themes() -> (Vec<(String, ThemeConfig)>, Vec<String>) {
+    match user_themes_dir() {
+        Some(dir) => load_user_themes_from(&dir),
+        None => (Vec::new(), Vec::new()),
+    }
+}
+
+/// Versión con ruta explícita (tests; ver `load_user_themes`).
+pub fn load_user_themes_from(dir: &std::path::Path) -> (Vec<(String, ThemeConfig)>, Vec<String>) {
+    let mut themes = Vec::new();
+    let mut warnings = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return (themes, warnings),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match toml::from_str::<ThemeConfig>(&text) {
+                Ok(config) => themes.push((name.to_lowercase(), config)),
+                Err(err) => warnings.push(format!("{}: {err}", path.display())),
+            },
+            Err(err) => warnings.push(format!("{}: {err}", path.display())),
+        }
+    }
+    themes.sort_by(|a, b| a.0.cmp(&b.0));
+    (themes, warnings)
+}
+
+/// Busca un tema por nombre (RF-71): primero los presets empaquetados,
+/// después los temas de usuario. Devuelve la config y el nombre canónico
+/// (minúsculas).
+pub fn find_theme(name: &str) -> Option<(ThemeConfig, String)> {
+    let wanted = name.trim().to_lowercase();
+    if let Some(config) = find_preset(&wanted) {
+        return Some((config, wanted));
+    }
+    let (themes, _) = load_user_themes();
+    find_user_theme(&themes, &wanted)
+}
+
+/// Busca un nombre entre temas de usuario cargados (lo separa de
+/// `find_theme` para poder probarlo con un directorio temporal).
+fn find_user_theme(
+    themes: &[(String, ThemeConfig)],
+    wanted: &str,
+) -> Option<(ThemeConfig, String)> {
+    themes
+        .iter()
+        .find(|(name, _)| name == wanted)
+        .map(|(name, config)| (config.clone(), name.clone()))
+}
+
+/// Nombres de todos los temas disponibles (presets y de usuario), para el
+/// selector del menú de opciones (RF-70).
+pub fn all_theme_names() -> Vec<String> {
+    let mut names: Vec<String> = PRESETS.iter().map(|(name, _)| (*name).to_string()).collect();
+    names.extend(load_user_themes().0.into_iter().map(|(name, _)| name));
+    names
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self {
@@ -214,6 +289,42 @@ mod tests {
         assert!(find_preset("DRACULA").is_some());
         assert!(find_preset(" Dracula ").is_some());
         assert!(find_preset("inexistente").is_none());
+    }
+
+    #[test]
+    fn user_themes_load_from_dir_with_warnings() {
+        let dir = std::env::temp_dir().join(format!(
+            "shellmusic-themes-{}-{:016x}",
+            std::process::id(),
+            crate::state_file::random_suffix()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mi-tema.toml"), "accent = \"#ff00ff\"\n").unwrap();
+        std::fs::write(dir.join("roto.toml"), "no es toml [[[[").unwrap();
+        std::fs::write(dir.join("ignorado.txt"), "accent = red").unwrap();
+        let (themes, warnings) = load_user_themes_from(&dir);
+        assert_eq!(themes.len(), 1, "temas: {themes:?}");
+        assert_eq!(themes[0].0, "mi-tema");
+        assert_eq!(themes[0].1.accent, "#ff00ff");
+        assert_eq!(warnings.len(), 1, "avisos: {warnings:?}");
+        assert!(warnings[0].contains("roto.toml"), "aviso: {:?}", warnings[0]);
+        // El preset sigue encontrándose por nombre.
+        assert!(find_theme("DRACULA").is_some());
+        // Y el tema de usuario se resuelve sobre la lista cargada (insensible
+        // a mayúsculas); find_theme lee el directorio real, no el temporal.
+        let (config, name) = find_user_theme(&themes, "mi-tema").expect("tema de usuario");
+        assert_eq!(name, "mi-tema");
+        assert_eq!(config.accent, "#ff00ff");
+        assert!(find_user_theme(&themes, "inexistente").is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn user_themes_missing_dir_is_empty() {
+        let dir = std::env::temp_dir().join("shellmusic-themes-que-no-existe-xyz");
+        let (themes, warnings) = load_user_themes_from(&dir);
+        assert!(themes.is_empty());
+        assert!(warnings.is_empty());
     }
 
     #[test]

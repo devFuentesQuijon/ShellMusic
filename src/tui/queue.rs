@@ -1,18 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph};
 
 use super::fmt_duration;
 use crate::app::{App, FilterState, Focus};
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Queue;
-    let border_style = if focused {
-        Style::new().fg(app.theme.accent)
-    } else {
-        Style::default()
-    };
     let visible = app.visible_queue();
     let total = app.queue.len();
     // Título: total, o visibles/total cuando el filtro recorta (como favoritos).
@@ -25,7 +20,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         Some(current) => format!("Cola ({}/{})", current + 1, filter_note),
         None => format!("Cola ({filter_note})"),
     };
-    let block = Block::bordered().title(title).border_style(border_style);
+    let block = super::panel_block(app, title, focused);
     if app.queue.is_empty() {
         frame.render_widget(Paragraph::new("Vacía — añade con 'a'").block(block), area);
         return;

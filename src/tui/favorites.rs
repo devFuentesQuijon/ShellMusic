@@ -1,18 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph};
 
 use super::fmt_duration;
 use crate::app::{App, Focus};
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Favorites;
-    let border_style = if focused {
-        Style::new().fg(app.theme.accent)
-    } else {
-        Style::default()
-    };
     let visible = app.visible_favorites();
     let total = app.favorites.tracks.len();
     // Título: total, o visibles/total cuando el filtro recorta.
@@ -21,9 +16,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         total.to_string()
     };
-    let block = Block::bordered()
-        .title(format!("Favoritos ({filter_note})"))
-        .border_style(border_style);
+    let block = super::panel_block(app, format!("Favoritos ({filter_note})"), focused);
     if app.favorites.tracks.is_empty() {
         frame.render_widget(
             Paragraph::new("Vacío — marca con 'f' en Resultados o Cola").block(block),
