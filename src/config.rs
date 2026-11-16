@@ -20,6 +20,7 @@ style = \"classic\"    # classic | modern — modern: bordes redondeados y barra
 initial_volume = 70       # 0-100
 format = \"\"               # selector de formato que recibe yt-dlp (mpv --ytdl-format): \"bestaudio\", \"worst\", \"bestaudio[abr<=128]\", ...; \"\" = criterio por defecto de yt-dlp
 gapless = false           # true: mpv apila la siguiente pista de la cola y la enchufa sin pausa (--gapless-audio); extrae la URL de la siguiente por adelantado
+crossfade = 0             # 0 = off · 1-10: fundido de salida en los últimos N s y de entrada en los primeros N s de cada pista (afade); combínalo con gapless
 
 [youtube]
 cookies_from_browser = \"auto\"   # \"auto\": primero sin cookies y, si YouTube bloquea, reintenta con cada navegador instalado; \"firefox\"/\"chrome\"/...: solo ese; \"\": nunca usar cookies
@@ -158,6 +159,9 @@ pub struct Audio {
     /// actual y la enchufa sin pausa al terminar (`--gapless-audio`).
     /// A cambio, extrae la URL de la siguiente pista por adelantado.
     pub gapless: bool,
+    /// Crossfade percibido (segundos; 0 = desactivado): fundido de salida en
+    /// los últimos N segundos de cada pista y de entrada en los primeros N.
+    pub crossfade: u32,
 }
 
 impl Default for General {
@@ -181,6 +185,7 @@ impl Default for Audio {
             initial_volume: 70,
             format: String::new(),
             gapless: false,
+            crossfade: 0,
         }
     }
 }
@@ -596,6 +601,21 @@ accent = \"cyan\"        # bordes del panel enfocado
         assert!(pos_key > pos_section);
         let config: Config = toml::from_str(&text).unwrap();
         assert!(config.audio.gapless);
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn update_audio_crossfade_preserves_comment() {
+        let path = temp_path("update-crossfade");
+        Config::update_at(&path, &[("audio.crossfade".to_string(), 5.into())]).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        let line = text.lines().find(|l| l.contains("crossfade = 5")).expect("clave");
+        assert!(line.contains('#'), "el comentario documentado se conserva: {line}");
+        let config: Config = toml::from_str(&text).unwrap();
+        assert_eq!(config.audio.crossfade, 5);
+        // El default sigue siendo off.
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.audio.crossfade, 0);
         fs::remove_file(&path).ok();
     }
 

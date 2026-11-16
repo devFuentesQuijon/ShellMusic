@@ -14,6 +14,9 @@ pub const CATEGORIES: &[&str] = &["Apariencia", "Reproducción", "Integraciones"
 /// Pasos de «Resultados por búsqueda» al ciclar con ←/→.
 const RESULTS_STEPS: &[usize] = &[5, 10, 15, 20, 30, 50];
 
+/// Pasos del crossfade en segundos (0 = off).
+const CROSSFADE_STEPS: &[u32] = &[0, 1, 2, 3, 5, 8, 10];
+
 const RADIO_MODES: &[RadioMode] = &[
     RadioMode::Artista,
     RadioMode::Similares,
@@ -32,6 +35,10 @@ fn on_off(on: bool) -> String {
     if on { "sí" } else { "no" }.to_string()
 }
 
+fn crossfade_label(secs: u32) -> String {
+    if secs == 0 { "off".to_string() } else { format!("{secs} s") }
+}
+
 /// Filas de la categoría dada con su valor actual.
 pub fn rows(app: &App, category: usize) -> Vec<Row> {
     match category {
@@ -43,6 +50,7 @@ pub fn rows(app: &App, category: usize) -> Vec<Row> {
         ],
         1 => vec![
             Row { label: "Gapless (sin pausa)", value: on_off(app.gapless) },
+            Row { label: "Crossfade (s)", value: crossfade_label(app.crossfade) },
             Row { label: "Radio automática", value: on_off(app.radio) },
             Row { label: "Modo de radio", value: app.radio_mode.to_string() },
         ],
@@ -178,10 +186,21 @@ fn apply(
             vec![("audio.gapless".to_string(), app.gapless.into())]
         }
         (1, 1) => {
+            let idx = CROSSFADE_STEPS
+                .iter()
+                .position(|step| *step == app.crossfade)
+                .unwrap_or(0);
+            let next = CROSSFADE_STEPS
+                [(idx as i32 + dir).rem_euclid(CROSSFADE_STEPS.len() as i32) as usize];
+            app.crossfade = next;
+            let _ = tx.send(AppMsg::SetCrossfade(next));
+            vec![("audio.crossfade".to_string(), (next as i64).into())]
+        }
+        (1, 2) => {
             app.radio = !app.radio;
             vec![("radio.enabled".to_string(), app.radio.into())]
         }
-        (1, 2) => {
+        (1, 3) => {
             let idx = RADIO_MODES
                 .iter()
                 .position(|mode| *mode == app.radio_mode)
@@ -372,13 +391,30 @@ gapless = false
         let (mut app, config_path) = app_with_temp_config();
         let (tx, _rx) = mpsc::unbounded_channel();
         assert_eq!(app.radio_mode, RadioMode::Artista);
-        cycle(&mut app, &tx, 1, 2, 1);
+        cycle(&mut app, &tx, 1, 3, 1);
         assert_eq!(app.radio_mode, RadioMode::Similares);
-        cycle(&mut app, &tx, 1, 2, -1);
-        cycle(&mut app, &tx, 1, 2, -1);
+        cycle(&mut app, &tx, 1, 3, -1);
+        cycle(&mut app, &tx, 1, 3, -1);
         assert_eq!(app.radio_mode, RadioMode::Rarezas, "envuelve hacia atrás");
         let text = std::fs::read_to_string(&config_path).unwrap();
         assert!(text.contains("mode = \"rarezas\""), "config:\n{text}");
+        cleanup(&app);
+    }
+
+    #[test]
+    fn cycle_crossfade_steps_and_wraps() {
+        let (mut app, config_path) = app_with_temp_config();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        assert_eq!(app.crossfade, 0);
+        cycle(&mut app, &tx, 1, 1, 1);
+        assert_eq!(app.crossfade, 1);
+        assert!(matches!(rx.try_recv(), Ok(AppMsg::SetCrossfade(1))));
+        cycle(&mut app, &tx, 1, 1, -1);
+        assert_eq!(app.crossfade, 0, "hacia atrás desde 1 vuelve a off");
+        cycle(&mut app, &tx, 1, 1, -1);
+        assert_eq!(app.crossfade, 10, "y desde off envuelve al máximo");
+        let text = std::fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("crossfade = 10"), "config:\n{text}");
         cleanup(&app);
     }
 

@@ -178,6 +178,10 @@ struct Shared {
     duration: Option<f64>,
     paused: bool,
     volume: i64,
+    /// Crossfade en segundos (0.0 = desactivado).
+    crossfade: f64,
+    /// Fades armados para la pista actual (se resetea en cada `start-file`).
+    fade: FadeState,
     pending: HashMap<u64, oneshot::Sender<Value>>,
     next_id: u64,
     stderr_tail: VecDeque<String>,
@@ -186,6 +190,53 @@ struct Shared {
     /// entrada anterior (p. ej. un `stop` previo) no deben resolver la
     /// espera de la nueva carga.
     pending_entry: Option<i64>,
+}
+
+/// Fades de la pista actual. La cadena `af` de mpv sobrevive al salto entre
+/// pistas, así que el estado se resetea por pista (`start-file`) para no
+/// heredar el fade-out anterior (dispararía en el `st` equivocado).
+#[derive(Default)]
+struct FadeState {
+    fadein_armed: bool,
+    fadeout_armed: bool,
+    /// Última posición vista: detecta seeks hacia atrás.
+    last_pos: Option<f64>,
+}
+
+/// Fundido de salida a aplicar (filtro `afade`).
+struct FadeOut {
+    /// Inicio del fundido, en segundos de pista (`st` de `afade`).
+    start: f64,
+    secs: f64,
+}
+
+/// Decide el fade-out a armar ahora. Exige `dur > n` para que el fundido
+/// ocupe los últimos `n` segundos completos de la pista.
+fn fadeout_plan(pos: f64, dur: Option<f64>, n: f64, armed: bool) -> Option<FadeOut> {
+    if armed || n <= 0.0 {
+        return None;
+    }
+    let dur = dur?;
+    if dur <= n || pos < dur - n {
+        return None;
+    }
+    Some(FadeOut {
+        start: dur - n,
+        secs: n,
+    })
+}
+
+/// Seek hacia atrás claro: la posición retrocede de golpe más de 2 s.
+fn is_backward_seek(pos: f64, last: Option<f64>) -> bool {
+    last.is_some_and(|last| pos + 2.0 < last)
+}
+
+fn fadein_graph(n: f64) -> String {
+    format!("@fadein:lavfi=[afade=t=in:st=0:d={n}]")
+}
+
+fn fadeout_graph(fade: &FadeOut) -> String {
+    format!("@fadeout:lavfi=[afade=t=out:st={}:d={}]", fade.start, fade.secs)
 }
 
 pub struct MpvPlayer {
@@ -273,6 +324,7 @@ impl MpvPlayer {
             read_half,
             Arc::clone(&shared),
             notify_tx.clone(),
+            out_tx.clone(),
         ));
 
         let player = Self {
@@ -446,6 +498,27 @@ impl Player for MpvPlayer {
         // al terminar (eof) mpv pasa a ella sin pausa con --gapless-audio.
         self.command(vec!["loadfile".into(), url.into(), "append".into()])
             .await?;
+        Ok(())
+    }
+
+    async fn set_crossfade(&self, secs: u32) -> Result<()> {
+        let off = secs == 0;
+        {
+            let mut shared = lock(&self.shared);
+            shared.crossfade = f64::from(secs);
+            if off {
+                // Sin crossfade no debe quedar ningún fade vivo.
+                shared.fade = FadeState::default();
+            }
+        }
+        if off {
+            let _ = self
+                .outgoing
+                .send(json!({ "command": ["af", "remove", "@fadein"] }));
+            let _ = self
+                .outgoing
+                .send(json!({ "command": ["af", "remove", "@fadeout"] }));
+        }
         Ok(())
     }
 
@@ -679,13 +752,14 @@ async fn reader_task<R>(
     reader: R,
     shared: Arc<Mutex<Shared>>,
     notify: mpsc::UnboundedSender<PlayerEvent>,
+    out: mpsc::UnboundedSender<Value>,
 ) where
     R: AsyncRead + Unpin,
 {
     let mut lines = BufReader::new(reader).lines();
     loop {
         match lines.next_line().await {
-            Ok(Some(line)) => handle_message(&line, &shared, &notify),
+            Ok(Some(line)) => handle_message(&line, &shared, &notify, &out),
             Ok(None) => {
                 // EOF: la conexión IPC se cerró porque mpv terminó en marcha.
                 let _ = notify.send(PlayerEvent::Died);
@@ -696,10 +770,18 @@ async fn reader_task<R>(
     }
 }
 
+/// Envía un comando al socket sin esperar respuesta (mpv no responde los
+/// mensajes sin `request_id`). Errores de envío se ignoran: el canal muere
+/// con mpv y el lector avisará con `Died`.
+fn fire_and_forget(out: &mpsc::UnboundedSender<Value>, command: Vec<Value>) {
+    let _ = out.send(json!({ "command": command }));
+}
+
 fn handle_message(
     line: &str,
     shared: &Arc<Mutex<Shared>>,
     notify: &mpsc::UnboundedSender<PlayerEvent>,
+    out: &mpsc::UnboundedSender<Value>,
 ) {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return;
@@ -717,7 +799,39 @@ fn handle_message(
             let data = value.get("data").cloned().unwrap_or(Value::Null);
             let mut shared = lock(shared);
             match name {
-                "time-pos" => shared.position = data.as_f64(),
+                "time-pos" => {
+                    let pos = data.as_f64();
+                    shared.position = pos;
+                    if let Some(pos) = pos {
+                        if shared.crossfade > 0.0 {
+                            if is_backward_seek(pos, shared.fade.last_pos)
+                                && shared.fade.fadein_armed
+                            {
+                                // Seek atrás: el fade-in heredado ahogaría el
+                                // audio hasta los `n` s de pista; se retira y
+                                // esta pista sigue sin fundido de entrada.
+                                fire_and_forget(
+                                    out,
+                                    vec!["af".into(), "remove".into(), "@fadein".into()],
+                                );
+                                shared.fade.fadein_armed = false;
+                            }
+                            if let Some(fade) = fadeout_plan(
+                                pos,
+                                shared.duration,
+                                shared.crossfade,
+                                shared.fade.fadeout_armed,
+                            ) {
+                                fire_and_forget(
+                                    out,
+                                    vec!["af".into(), "add".into(), fadeout_graph(&fade).into()],
+                                );
+                                shared.fade.fadeout_armed = true;
+                            }
+                        }
+                        shared.fade.last_pos = Some(pos);
+                    }
+                }
                 "duration" => shared.duration = data.as_f64(),
                 "pause" => shared.paused = data.as_bool().unwrap_or(false),
                 "volume" => {
@@ -733,9 +847,28 @@ fn handle_message(
             // rezagado de la entrada anterior (p. ej. de un stop) llega antes
             // que este start-file y no debe resolver la espera.
             let entry = value.get("playlist_entry_id").and_then(Value::as_i64);
-            let mut shared = lock(shared);
-            if shared.outcome_tx.is_some() {
-                shared.pending_entry = entry;
+            let n = {
+                let mut shared = lock(shared);
+                if shared.outcome_tx.is_some() {
+                    shared.pending_entry = entry;
+                }
+                // Fades: la cadena `af` sobrevive al salto de pista, así que
+                // se retiran los filtros de la pista anterior (el fade-out
+                // heredado dispararía en el `st` equivocado de la nueva) y se
+                // rearma solo el fade-in si el crossfade está activo. Si el
+                // evento llega algo antes del fin de la anterior, `st=0` ya
+                // está saturado (ganancia 1) y no la afecta.
+                shared.fade = FadeState::default();
+                shared.crossfade
+            };
+            fire_and_forget(out, vec!["af".into(), "remove".into(), "@fadein".into()]);
+            fire_and_forget(out, vec!["af".into(), "remove".into(), "@fadeout".into()]);
+            if n > 0.0 {
+                fire_and_forget(
+                    out,
+                    vec!["af".into(), "add".into(), fadein_graph(n).into()],
+                );
+                lock(shared).fade.fadein_armed = true;
             }
         }
         Some("playback-restart") => {
@@ -836,6 +969,46 @@ mod tests {
         assert_eq!(secs_to_duration(-2.5), Duration::ZERO);
         assert_eq!(secs_to_duration(0.0), Duration::ZERO);
         assert_eq!(secs_to_duration(1.5), Duration::from_secs_f64(1.5));
+    }
+
+    #[test]
+    fn fadeout_plan_arms_at_threshold_once() {
+        // pista de 185 s, crossfade de 5 s: el fade ocupa [180, 185].
+        let plan = fadeout_plan(180.0, Some(185.0), 5.0, false);
+        let fade = plan.expect("debe armar en el umbral");
+        assert_eq!(fade.start, 180.0);
+        assert_eq!(fade.secs, 5.0);
+        // Dentro del fade y ya armado: no re-dispara.
+        assert!(fadeout_plan(182.0, Some(185.0), 5.0, true).is_none());
+        // El `st` se mantiene aunque se arme tarde: el fundido siempre
+        // completa silencio justo al terminar la pista.
+        let late = fadeout_plan(183.5, Some(185.0), 5.0, false).expect("arma tarde");
+        assert_eq!(late.start, 180.0);
+    }
+
+    #[test]
+    fn fadeout_plan_ignores_short_or_unknown_tracks() {
+        assert!(fadeout_plan(10.0, None, 5.0, false).is_none(), "sin duración");
+        assert!(fadeout_plan(4.0, Some(5.0), 5.0, false).is_none(), "pista ≤ fade");
+        assert!(fadeout_plan(179.0, Some(185.0), 5.0, false).is_none(), "antes del umbral");
+        assert!(fadeout_plan(182.0, Some(185.0), 0.0, false).is_none(), "crossfade off");
+    }
+
+    #[test]
+    fn backward_seek_detection() {
+        assert!(is_backward_seek(10.0, Some(60.0)));
+        assert!(!is_backward_seek(59.0, Some(60.0)), "drift normal");
+        assert!(!is_backward_seek(10.0, None), "sin historial");
+    }
+
+    #[test]
+    fn fade_graphs_use_labeled_lavfi() {
+        assert_eq!(fadein_graph(5.0), "@fadein:lavfi=[afade=t=in:st=0:d=5]");
+        let fade = FadeOut { start: 180.0, secs: 5.0 };
+        assert_eq!(
+            fadeout_graph(&fade),
+            "@fadeout:lavfi=[afade=t=out:st=180:d=5]"
+        );
     }
 
     #[test]

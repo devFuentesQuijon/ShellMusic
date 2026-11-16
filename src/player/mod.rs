@@ -55,6 +55,13 @@ pub trait Player: Send + Sync {
     async fn append(&self, _url: &str) -> Result<()> {
         Ok(())
     }
+    /// Fija el crossfade (segundos; 0 = desactivado). El motor de fades vive
+    /// en el reproductor: es quien conoce la posición y la duración. El
+    /// valor por defecto no-op mantiene compilados los reproductores de
+    /// prueba que no implementan crossfade.
+    async fn set_crossfade(&self, _secs: u32) -> Result<()> {
+        Ok(())
+    }
     async fn toggle_pause(&self) -> Result<()>;
     async fn stop(&self) -> Result<()>;
     /// Salto relativo dentro de la pista (segundos, puede ser negativo).

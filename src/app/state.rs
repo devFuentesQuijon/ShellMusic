@@ -394,6 +394,8 @@ pub struct App {
     pub playback_active: bool,
     /// `[audio] gapless`: se apila la siguiente pista de la cola en mpv.
     pub gapless: bool,
+    /// `[audio] crossfade`: segundos de fundido entre pistas (0 = off).
+    pub crossfade: u32,
     /// Cliente de scrobbling Last.fm: Some cuando `[lastfm] enabled` y hay
     /// clave y sesión guardada (`lastfm.json`); el alta es `--lastfm-auth`.
     pub lastfm: Option<crate::lastfm::Client>,
@@ -633,6 +635,7 @@ impl App {
             radio_expanded_for: None,
             playback_active: false,
             gapless: config.audio.gapless,
+            crossfade: config.audio.crossfade,
             mpv_appended: None,
             lastfm,
             playing: None,

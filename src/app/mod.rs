@@ -57,6 +57,9 @@ pub(super) enum AppMsg {
     /// sobre `SystemIntegration`, que vive en el run loop.
     SetNotifications(bool),
     SetDiscord(bool),
+    /// Ajusta el crossfade (RF-72) sobre el reproductor, que vive en el
+    /// run loop y es quien programa los fades.
+    SetCrossfade(u32),
 }
 
 /// Operación del puente YouTube Music cuyo resultado llega en `AppMsg::YtmDone`.
@@ -129,6 +132,8 @@ pub async fn run(
     let audio_format = config.audio.format.clone();
     let gapless = config.audio.gapless;
     let mut player = player;
+    // El crossfade lo aplica el reproductor (conoce posición y duración).
+    let _ = player.set_crossfade(config.audio.crossfade).await;
     let mut respawn_times: Vec<std::time::Instant> = Vec::new();
     let mut respawn_rx: Option<RespawnRx> = None;
     let mut player_respawning = false;
@@ -273,6 +278,10 @@ pub async fn run(
                         }
                         app.discord_enabled = on;
                     }
+                    AppMsg::SetCrossfade(secs) => {
+                        app.crossfade = secs;
+                        let _ = player.set_crossfade(secs).await;
+                    }
                     other => handle_msg(&mut app, other, &player, &tx),
                 }
                 needs_redraw = true;
@@ -329,6 +338,7 @@ pub async fn run(
                         // El mpv nuevo tiene la playlist interna vacía: la
                         // pista apilada para gapless ya no existe.
                         app.mpv_appended = None;
+                        let _ = player.set_crossfade(app.crossfade).await;
                         app.message = Some(Message::info("mpv reiniciado"));
                     }
                     Err(err) => {
