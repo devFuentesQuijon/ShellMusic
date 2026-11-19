@@ -1,6 +1,7 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, List, ListItem, Paragraph};
 
 use super::playlists::{block, centered};
@@ -11,7 +12,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         return;
     }
     let area = centered(frame.area(), 60, 70);
-    app.overlay_page_size = area.height.saturating_sub(3).max(1) as usize;
     frame.render_widget(Clear, area);
     let accent = app.theme.accent;
     let muted = app.theme.muted;
@@ -28,13 +28,43 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         app.stats.top_artists().len()
     );
     let block_widget = block(header, accent, super::border_type(app.ui_style));
+    let inner = block_widget.inner(area);
+    frame.render_widget(block_widget, area);
+
+    // Gráfica de escuchas por día (braille, estilo btop): solo cuando hay
+    // serie registrada; ocupa etiqueta + 2 líneas de puntos.
+    let spark = if app.stats.daily.is_empty() {
+        None
+    } else {
+        Some(super::sparkline(&app.stats.daily_series(30)))
+    };
+    let spark_rows: u16 = if spark.is_some() { 3 } else { 0 };
+    app.overlay_page_size = inner
+        .height
+        .saturating_sub(spark_rows + 1) // 1 = línea de hints
+        .max(1) as usize;
 
     if app.stats.entries.is_empty() {
         frame.render_widget(
-            Paragraph::new("Aún no hay estadísticas — reproduce algo primero").block(block_widget),
-            area,
+            Paragraph::new("Aún no hay estadísticas — reproduce algo primero"),
+            inner,
         );
         return;
+    }
+
+    let chunks = Layout::vertical([Constraint::Length(spark_rows), Constraint::Min(1)]).split(inner);
+    if let Some(lines) = spark {
+        let label = Line::from(Span::styled(
+            "escuchas/día · últimos 30 días",
+            Style::new().fg(muted),
+        ));
+        let graph = lines
+            .into_iter()
+            .map(|text| Line::from(Span::styled(text, Style::new().fg(accent))))
+            .collect::<Vec<_>>();
+        let mut rows = vec![label];
+        rows.extend(graph);
+        frame.render_widget(Paragraph::new(rows), chunks[0]);
     }
 
     let items: Vec<ListItem> = match app.stats_view {
@@ -67,10 +97,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .collect(),
     };
     let list = List::new(items)
-        .block(block_widget)
         .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(list, area, &mut app.stats_state);
+    frame.render_stateful_widget(list, chunks[1], &mut app.stats_state);
 
     if area.height >= 3 {
         let hint_area = Rect {

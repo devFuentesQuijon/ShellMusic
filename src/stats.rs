@@ -1,7 +1,7 @@
 //! Estadísticas locales de escucha: conteo de reproducciones por pista y
 //! artistas más oídos, persistidas en `stats.json`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -78,6 +78,10 @@ impl StatsEntry {
 struct StatsFile {
     version: u32,
     entries: Vec<StatsEntry>,
+    /// Reproducciones por día (`YYYY-MM-DD` UTC), para la gráfica del
+    /// overlay de estadísticas. Ausente en archivos de fases anteriores.
+    #[serde(default)]
+    daily: BTreeMap<String, u64>,
 }
 
 /// Vista prestada para serializar sin clonar las entradas.
@@ -85,7 +89,11 @@ struct StatsFile {
 struct StatsRef<'a> {
     version: u32,
     entries: &'a [StatsEntry],
+    daily: &'a BTreeMap<String, u64>,
 }
+
+/// Días de la serie diaria que se conservan al guardar (cola de la gráfica).
+const DAILY_KEEP_DAYS: usize = 120;
 
 /// Normaliza un nombre de artista para agrupar estadísticas: quita los
 /// sufijos que YouTube añade a los canales oficiales («Daft Punk - Topic»,
@@ -134,6 +142,8 @@ pub struct ArtistCount {
 #[derive(Debug, Default)]
 pub struct Stats {
     pub entries: Vec<StatsEntry>,
+    /// Reproducciones por día UTC (`YYYY-MM-DD`), serie de la gráfica.
+    pub daily: BTreeMap<String, u64>,
 }
 
 impl Stats {
@@ -156,6 +166,7 @@ impl Stats {
             Ok(file) if file.version == VERSION => Ok((
                 Self {
                     entries: file.entries,
+                    daily: file.daily,
                 },
                 None,
             )),
@@ -182,6 +193,14 @@ impl Stats {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)?;
         }
+        // La serie diaria se poda a la cola de la gráfica; las claves
+        // `YYYY-MM-DD` ordenan cronológicas en el BTreeMap.
+        let daily: BTreeMap<String, u64> = self
+            .daily
+            .iter()
+            .skip(self.daily.len().saturating_sub(DAILY_KEEP_DAYS))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
         // JSON compacto por referencia: sin clonar las entradas y con menos
         // bytes; el parseo es idéntico.
         let tmp = unique_tmp_path(path);
@@ -190,14 +209,16 @@ impl Stats {
             serde_json::to_string(&StatsRef {
                 version: VERSION,
                 entries: &self.entries,
+                daily: &daily,
             })?,
         )?;
         fs::rename(&tmp, path)?;
         Ok(())
     }
 
-    /// Registra una reproducción: incrementa el conteo y la fecha.
+    /// Registra una reproducción: incrementa el conteo, la fecha y el día.
     pub fn record(&mut self, track: &Track) {
+        *self.daily.entry(today_string()).or_default() += 1;
         let key = track_key(track);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -232,6 +253,25 @@ impl Stats {
 
     pub fn total_plays(&self) -> u64 {
         self.entries.iter().map(|e| e.plays).sum()
+    }
+
+    /// Serie de reproducciones de los últimos `days` días terminando hoy
+    /// (UTC), con días sin escuchas rellenados a 0. Es la fuente de la
+    /// gráfica del overlay de estadísticas.
+    pub fn daily_series(&self, days: usize) -> Vec<u64> {
+        let today = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() / 86_400);
+        (0..days)
+            .rev()
+            .map(|back| {
+                let day = today.saturating_sub(back as u64);
+                self.daily
+                    .get(&format_timestamp(day * 86_400)[..10])
+                    .copied()
+                    .unwrap_or(0)
+            })
+            .collect()
     }
 
     /// Pistas ordenadas por reproducciones (desempate: más reciente primero).
@@ -423,6 +463,51 @@ mod tests {
         assert_eq!(loaded.entries.len(), 1);
         assert_eq!(loaded.entries[0].plays, 2);
         assert!(loaded.entries[0].last_played > 0);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn record_counts_daily_and_series_fills_gaps() {
+        let mut stats = Stats::default();
+        let today = today_string();
+        stats.record(&track("a", "x"));
+        stats.record(&track("a", "x"));
+        assert_eq!(stats.daily.get(&today).copied(), Some(2));
+        let series = stats.daily_series(3);
+        assert_eq!(series.len(), 3);
+        assert_eq!(series[2], 2, "hoy es el último punto");
+        assert_eq!(series[0], 0, "días sin escuchas quedan a 0");
+    }
+
+    #[test]
+    fn save_prunes_daily_to_keep_window() {
+        let path = temp_path("prune.json");
+        let mut stats = Stats::default();
+        // Claves que ordenan tras la fecha de hoy («z…» > «2026-…»).
+        for i in 0..150u32 {
+            stats.daily.insert(format!("z{i:03}"), 1);
+        }
+        stats.record(&track("a", "x"));
+        stats.save(&path).unwrap();
+        let (loaded, warning) = Stats::load(&path).unwrap();
+        assert!(warning.is_none());
+        assert_eq!(loaded.daily.len(), DAILY_KEEP_DAYS);
+        assert!(!loaded.daily.contains_key("z029"), "la cola más vieja cae");
+        assert!(loaded.daily.contains_key("z030"));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn old_file_without_daily_loads_and_gains_series() {
+        let path = temp_path("legacy.json");
+        fs::write(&path, r#"{"version":1,"entries":[]}"#).unwrap();
+        let (mut loaded, warning) = Stats::load(&path).unwrap();
+        assert!(warning.is_none(), "la migración no amonesta");
+        assert!(loaded.daily.is_empty());
+        loaded.record(&track("a", "x"));
+        loaded.save(&path).unwrap();
+        let (reloaded, _) = Stats::load(&path).unwrap();
+        assert_eq!(reloaded.daily.len(), 1);
         let _ = fs::remove_file(&path);
     }
 

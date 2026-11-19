@@ -216,6 +216,46 @@ pub(super) fn gradient_bar(
     Line::from(spans)
 }
 
+/// Gráfica de línea en braille (estilo btop) para una serie de valores: dos
+/// líneas de texto donde cada carácter codifica 2 columnas × 4 puntos, con
+/// la base abajo: niveles 1-4 llenan la línea inferior y 5-8 la superior.
+/// Los valores se escalan al máximo de la serie (que llena las 8 posiciones);
+/// un 0 deja su columna vacía. Útil embebida en un `Paragraph::new`.
+pub(super) fn sparkline(values: &[u64]) -> Vec<String> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    let max = values.iter().copied().max().unwrap_or(0);
+    // Altura en puntos (1-8): el mínimo no nulo marca un punto para que las
+    // escuchas aisladas se vean.
+    let height = |v: u64| -> usize {
+        if v == 0 || max == 0 {
+            0
+        } else {
+            v.saturating_mul(8).div_euclid(max).clamp(1, 8) as usize
+        }
+    };
+    // Puntos braille por columna: izquierda 1,2,3,7 · derecha 4,5,6,8.
+    const BITS: [[u32; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+    let mut lines = vec![String::new(), String::new()];
+    for pair in values.chunks(2) {
+        let mut upper = 0u32;
+        let mut lower = 0u32;
+        for (col, value) in pair.iter().enumerate() {
+            let h = height(*value);
+            for &bit in &BITS[col][..h.min(4)] {
+                lower |= bit;
+            }
+            for &bit in &BITS[col][..h.saturating_sub(4)] {
+                upper |= bit;
+            }
+        }
+        lines[0].push(char::from_u32(0x2800 + upper).unwrap_or(' '));
+        lines[1].push(char::from_u32(0x2800 + lower).unwrap_or(' '));
+    }
+    lines
+}
+
 pub fn fmt_duration(duration: Option<Duration>) -> String {
     match duration {
         Some(d) => {
@@ -267,5 +307,24 @@ mod tests {
     fn border_type_follows_ui_style() {
         assert_eq!(border_type(UiStyle::Classic), BorderType::Plain);
         assert_eq!(border_type(UiStyle::Modern), BorderType::Rounded);
+    }
+
+    #[test]
+    fn sparkline_renders_braille_pairs() {
+        assert!(sparkline(&[]).is_empty());
+        // Valores iguales al máximo: columna completa (puntos 1-8, ⣿).
+        assert_eq!(sparkline(&[1, 1]), ["\u{28ff}".to_string(), "\u{28ff}".to_string()]);
+        // 0 deja su columna vacía; el máximo llena la suya.
+        assert_eq!(sparkline(&[0, 1]), ["\u{28b8}".to_string(), "\u{28b8}".to_string()]);
+        // Escalado: la mitad del máximo ocupa solo la línea inferior; la
+        // columna se ancla abajo (la superior queda vacía en su celda).
+        assert_eq!(
+            sparkline(&[0, 2, 4]),
+            ["\u{2800}\u{2847}".to_string(), "\u{28b8}\u{2847}".to_string()]
+        );
+        // Número impar: la última celda usa solo la columna izquierda.
+        let lines = sparkline(&[1, 0, 1]);
+        assert_eq!(lines[0].chars().count(), 2);
+        assert_eq!(lines[0], "\u{2847}\u{2847}");
     }
 }

@@ -8,6 +8,6 @@
 
 ## Estadísticas de escucha
 
-**Estadísticas** (`t`): cada pista que arranca cuenta una reproducción en `stats.json` (mismo directorio de datos que favoritos/playlists, escritura atómica, y guardado periódico de los conteos pendientes). El overlay «Tus más escuchadas» muestra el ranking de pistas (`Enter` reproduce, `a` encola) y, con `Tab`, el de artistas.
+**Estadísticas** (`t`): cada pista que arranca cuenta una reproducción en `stats.json` (mismo directorio de datos que favoritos/playlists, escritura atómica, y guardado periódico de los conteos pendientes). El overlay «Tus más escuchadas» muestra el ranking de pistas (`Enter` reproduce, `a` encola) y, con `Tab`, el de artistas y el historial cronológico. Arriba se dibuja la **gráfica de escuchas por día** de los últimos 30 días (braille, estilo btop): cada reproducción también alimenta esa serie diaria (`daily` en `stats.json`, podada a 120 días); las estadísticas guardadas antes de esta versión no tienen historial y la gráfica empieza a poblarla desde la primera reproducción nueva.
 
 Los artistas se agrupan por forma canónica: las variantes que YouTube añade a los canales oficiales («Daft Punk - Topic», «AdeleVEVO», «Artist feat. X») cuentan como el mismo artista, mostrando la forma más frecuente. Es normalización offline, sin red: se evaluó MusicBrainz para esto y quedó descartado por su límite de 1 petición/segundo, inviable en el path de uso.

@@ -14,10 +14,10 @@ TUI ultraliviana para buscar y reproducir música de YouTube Music y SoundCloud.
 ## Características
 
 - **Busca y reproduce** YouTube Music y SoundCloud sin abrir el navegador (`m` cambia de proveedor en caliente); también acepta URLs pegadas de vídeo, playlist o Bandcamp.
-- **Cola gestionable y persistente**: añade, quita, reordena, baraja; `e` encola a continuación y `w` guarda la cola como playlist; al cerrar y reabrir, la cola, la pista y la posición se reanudan donde lo dejaste (a prueba de `kill -9`). Reproducción **gapless** opcional (`[audio] gapless = true`).
+- **Cola gestionable y persistente**: añade, quita, reordena, baraja; `e` encola a continuación y `w` guarda la cola como playlist; al cerrar y reabrir, la cola, la pista y la posición se reanudan donde lo dejaste (a prueba de `kill -9`). Reproducción **gapless** opcional y **crossfade** por volumen (`[audio] gapless` / `[audio] crossfade`, también en el menú F2).
 - **Modo radio** con cinco sub-modos (artista, similares, random, random género, rarezas) y prefetch sin pausa.
 - **Favoritos y playlists locales** con escritura atómica y recuperación ante archivos corruptos: cero cuentas, cero nube. **Búsqueda en vivo** dentro de cada una con `/`. **Playlists inteligentes** (`✦`): «Más escuchadas», «Sin estrenar» y «Redescubrir», derivadas de tus estadísticas y favoritos.
-- **Estadísticas de escucha** (`t`) con top de pistas, artistas e **historial cronológico**; **letras** (`L`, vía lrclib.net), panel **«sonando ahora»** con carátula (`i`) y autocompletado de búsqueda desde tu historial.
+- **Estadísticas de escucha** (`t`) con top de pistas, artistas, **historial cronológico** y **gráfica de escuchas por día** (braille); **letras** (`L`, vía lrclib.net), panel **«sonando ahora»** con carátula (`i`) y autocompletado de búsqueda desde tu historial.
 - **Portabilidad** (`X`/`I`): exporta e importa playlists y favoritos (JSON/M3U).
 - **Integración con el sistema**: notificaciones de escritorio **con carátula**, MPRIS en Linux (teclas multimedia, widgets, KDE Connect), **presencia en Discord** y **scrobbling Last.fm** (`smusic --lastfm-auth`).
 - **Agentes de IA**: socket de control local opt-in (`[mcp] enabled`) y puente **MCP** (`smusic-mcp`): busca, reproduce y gestiona la cola desde Claude Code y otros agentes ([docs/mcp.md](docs/mcp.md)).
