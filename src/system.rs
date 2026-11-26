@@ -344,8 +344,13 @@ fn map_event(event: MediaControlEvent) -> Option<MediaCommand> {
         }
         MediaControlEvent::SetPosition(MediaPosition(pos)) => Some(MediaCommand::SetPosition(pos)),
         MediaControlEvent::SetVolume(volume) => Some(MediaCommand::SetVolume(volume)),
-        // Una TUI no puede elevar ventana; Quit/OpenUri no aplican.
-        MediaControlEvent::Raise | MediaControlEvent::Quit | MediaControlEvent::OpenUri(_) => None,
+        // Una TUI no puede elevar ventana; Quit/OpenUri no aplican; SetShuffle
+        // solo lo emite macOS/iOS; el enum es non_exhaustive.
+        MediaControlEvent::Raise
+        | MediaControlEvent::Quit
+        | MediaControlEvent::OpenUri(_)
+        | MediaControlEvent::SetShuffle(_)
+        | _ => None,
     }
 }
 
