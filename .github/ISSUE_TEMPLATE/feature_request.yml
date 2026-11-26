@@ -1,0 +1,40 @@
+name: Propuesta de funcionalidad
+description: Una idea nueva para ShellMusic
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Las funcionalidades nuevas se discuten antes de implementarse:
+        la especificación ([SPEC.md](../blob/main/SPEC.md)) manda sobre el diseño.
+
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qué problema resuelve
+      description: La necesidad o el caso de uso, no la solución. «Cuando hago X, me pasa Y y me gustaría Z».
+    validations:
+      required: true
+
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Propuesta
+      description: Cómo te la imaginas funcionando (tecla, comando, opción de config…).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas consideradas
+      description: Otras formas de resolverlo y por qué las descartas.
+
+  - type: checkboxes
+    id: encaje
+    attributes:
+      label: Encaje con el proyecto
+      options:
+        - label: He leído la [especificación](../blob/main/SPEC.md) y la propuesta no contradice sus reglas (TUI ligera, cero cuentas obligatorias, proveedores tras el trait `MusicProvider`).
+          required: false

@@ -1,0 +1,88 @@
+name: Reporte de bug
+description: Algo no funciona como debería
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar. Si es una **vulnerabilidad de seguridad**, no
+        uses esta plantilla: sigue la [política de seguridad](../blob/main/.github/SECURITY.md).
+
+  - type: textarea
+    id: que-pasa
+    attributes:
+      label: Qué pasa
+      description: Descripción clara del fallo.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Pasos para reproducir
+      description: Cuanto más concretos, mejor (búsqueda exacta, teclas pulsadas, config relevante).
+      placeholder: |
+        1. `smusic --play "daft punk"`
+        2. Pulso `n` para siguiente pista
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas que pasara
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión de ShellMusic
+      description: Nombre del binario de la release (`smusic-linux-x86_64`…), versión de `cargo install` o commit.
+      placeholder: v0.3.0 / commit a80d2e7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: so
+    attributes:
+      label: Sistema operativo
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Otro
+    validations:
+      required: true
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal y versión
+      description: Importante para bugs de renderizado, teclas o ratón.
+      placeholder: kitty 0.45, GNOME Terminal 3.58, Windows Terminal 1.22…
+
+  - type: input
+    id: deps
+    attributes:
+      label: Versiones de mpv y yt-dlp
+      description: Salida de `mpv --version` y `yt-dlp --version` (solo la primera línea de cada uno).
+      placeholder: mpv 0.40.0, yt-dlp 2026.10.01
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Config relevante
+      description: Pega las secciones de `~/.config/shellmusic/config.toml` relacionadas (sin secretos) o escribe "por defecto".
+      render: toml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Salida o capturas
+      description: Mensajes de error, salida con RUST_BACKTRACE=1 si hubo panic, o capturas de pantalla.
+      render: text

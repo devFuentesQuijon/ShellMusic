@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vulnerabilidad de seguridad
+    url: https://github.com/devFuentesQuijon/ShellMusic/security/advisories/new
+    about: Repórtala en privado; no abras un issue público.
+  - name: Documentación
+    url: https://github.com/devFuentesQuijon/ShellMusic/tree/main/docs
+    about: Guías de configuración, atajos, temas, MCP e integración con el sistema.
