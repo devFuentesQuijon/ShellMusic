@@ -601,8 +601,8 @@ fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>
 
 async fn check_dependencies() -> Result<String> {
     let (mpv, ytdlp) = tokio::join!(
-        check_install("mpv", "Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv"),
-        check_install("yt-dlp", "Linux/macOS: pip install yt-dlp (o tu gestor de paquetes) · Windows: winget install yt-dlp"),
+        check("mpv", "windows"),
+        check("yt-dlp", "windows"),
     );
     mpv?;
     // La versión de yt-dlp se reutiliza para el aviso de antigüedad: evita
