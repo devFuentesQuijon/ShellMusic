@@ -601,14 +601,8 @@ fn build_providers(config: &Config) -> Vec<(ProviderKind, Arc<dyn MusicProvider>
 
 async fn check_dependencies() -> Result<String> {
     let (mpv, ytdlp) = tokio::join!(
-        check(
-            "mpv",
-            "Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv",
-        ),
-        check(
-            "yt-dlp",
-            "Linux/macOS: pip install yt-dlp (o tu gestor de paquetes) · Windows: winget install yt-dlp",
-        ),
+        check_install("mpv", "Linux: sudo apt install mpv · macOS: brew install mpv · Windows: winget install mpv"),
+        check_install("yt-dlp", "Linux/macOS: pip install yt-dlp (o tu gestor de paquetes) · Windows: winget install yt-dlp"),
     );
     mpv?;
     // La versión de yt-dlp se reutiliza para el aviso de antigüedad: evita
@@ -618,7 +612,50 @@ async fn check_dependencies() -> Result<String> {
 
 /// Comprueba que `binary` está en el PATH y devuelve la primera línea de
 /// `{binary} --version`; si falta, balea con instrucciones de instalación.
-async fn check(binary: &str, hint: &str) -> Result<String> {
+/// Intenta instalar `binary` automáticamente: primero winget en Windows,
+/// luego pip en otros sistemas. Si la instalación falla o no es necesaria,
+/// devuelve Ok sin instalar.
+async fn install(binary: &str, system: &str) -> Result<()> {
+    let install_cmd = match system {
+        "windows" => {
+            if Command::new("winget")
+                .arg("install")
+                .arg(binary)
+                .arg("--accept-package-agreements")
+                .arg("--accept-source-agreements")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+            bail!("winget no disponible")
+        }
+        "linux" | "macos" => {
+            if Command::new("pip")
+                .arg("install")
+                .arg(binary)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .await
+                .is_ok()
+            {
+                return Ok(());
+            }
+            bail!("pip no disponible")
+        }
+        _ => bail!("sistema no soportado"),
+    };
+    bail!("instalación fallida: {install_cmd:?}")
+}
+
+/// Comprueba que `binary` está en el PATH y devuelve la primera línea de
+/// `{binary} --version`; si falta, intenta instalarlo automáticamente según
+/// el sistema operativo.
+async fn check(binary: &str, system: &str) -> Result<String> {
     let output = Command::new(binary)
         .arg("--version")
         .stdin(Stdio::null())
@@ -629,7 +666,21 @@ async fn check(binary: &str, hint: &str) -> Result<String> {
         Ok(output) if output.status.success() => {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        _ => bail!("No se encontró «{binary}» en el PATH.\nInstálalo con: {hint}"),
+        _ => {
+            let _ = install(binary, system).await;
+            let output = Command::new(binary)
+                .arg("--version")
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output()
+                .await;
+            match output {
+                Ok(output) if output.status.success() => {
+                    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                }
+                _ => bail!("No se encontró «{binary}» en el PATH y no se pudo instalar"),
+            }
+        }
     }
 }
 
