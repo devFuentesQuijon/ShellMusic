@@ -266,6 +266,7 @@ else:
         result
     }
 
+    #[cfg(unix)]
     const COOKIE: &str = "__Secure-3PAPISID=zztop123; SAPISID=aa; SID=gg";
 
     /// El puente entiende los cuatro formatos de copia del navegador y
